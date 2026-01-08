@@ -1,0 +1,17 @@
+node_modules/
+dist
+.DS_Store
+*.log
+.env
+.env.local
+.cursor
+.vscode
+server.js
+server-new.js
+server.log
+cfo_database.db
+*.db
+uploads/
+scripts/
+tmp-playwright.cjs
+tmp-playwright.js
