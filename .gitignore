@@ -6,8 +6,8 @@ dist
 .env.local
 .cursor
 .vscode
-server.js
-server-new.js
+# السماح بتتبع ملفات الخادم لبيئة النشر
+# (لا تستبعد server.js أو server-new.js)
 server.log
 cfo_database.db
 *.db
