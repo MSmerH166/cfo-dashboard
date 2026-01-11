@@ -337,94 +337,148 @@ export default function FinancialAnalysisReport({ financialSummary, financialRat
     const [showKpiExplain, setShowKpiExplain] = useState(false);
 
     const yearData = useMemo(() => {
-        const map = {};
-        YEARS.forEach((y) => {
-            const isData = y === 2025 ? data2025?.is : historicalIS?.[y];
-            const bsData = y === 2025 ? data2025?.bs : historicalBS?.[y];
-            if (!isData || !bsData) return;
+        try {
+            const map = {};
+            const sumKeys = (obj, keys = []) => keys.reduce((sum, k) => sum + (Number(obj?.[k]) || 0), 0);
 
-            // مرونة في أسماء الحقول لتفادي "غير متوفر" عند اختلاف التسمية
-            const revenue = isData.revenue ?? isData.sales ?? isData.totalRevenue ?? null;
-            const cogs = isData.cogs ?? isData.costOfSales ?? null;
-            const expenses = isData.expenses ?? isData.operatingExpenses ?? 0;
-            const depreciation = isData.depreciation ?? isData.dep ?? 0;
-            const netIncomeRaw = isData.netIncome ?? isData.netProfit ?? isData.profitAfterTax ?? isData.pat ?? isData.profit ?? null;
-            const netIncome = Number.isFinite(netIncomeRaw)
-                ? netIncomeRaw
-                : (Number.isFinite(revenue) && Number.isFinite(cogs)
-                    ? (revenue - cogs - (Number.isFinite(expenses) ? expenses : 0) - (Number.isFinite(depreciation) ? depreciation : 0) - (isData.zakat ?? 0))
-                    : null);
+            YEARS.forEach((y) => {
+                const isData = y === 2025 ? data2025?.is : historicalIS?.[y];
+                const bsData = y === 2025 ? data2025?.bs : historicalBS?.[y];
+                // نبني السنة حتى لو كانت بيانات الدخل غير متوفرة، طالما الميزانية موجودة
+                if (!bsData) return;
+                const safeIS = isData || {};
 
-            const assets = bsData.totalAssets ?? bsData.assetsTotal ?? bsData.assets ?? null;
-            const equity = bsData.equityTotal ?? bsData.equity ?? bsData.totalEquity ?? null;
-            const currentAssets = bsData.currentAssets ?? bsData.currentAssetsTotal ?? bsData.cashBank ?? null;
-            const currentLiabilities = bsData.currentLiabilities ?? bsData.currentLiabilitiesTotal ?? null;
-            const totalLiabilities = bsData.totalLiabilities ?? bsData.liabilitiesTotal ?? null;
-            const inventory = bsData.inventory ?? bsData.stocks ?? null;
-            const cashBank = bsData.cashBank ?? bsData.cash ?? bsData.cashAndCashEquivalents ?? null;
-            const grossProfit = Number.isFinite(revenue) && Number.isFinite(cogs) ? revenue - cogs : null;
+                // مرونة في أسماء الحقول لتفادي "غير متوفر" عند اختلاف التسمية
+                const revenue = safeIS.revenue ?? safeIS.sales ?? safeIS.totalRevenue ?? null;
+                const cogs = safeIS.cogs ?? safeIS.costOfSales ?? null;
+                const expenses = safeIS.expenses ?? safeIS.operatingExpenses ?? 0;
+                const depreciation = safeIS.depreciation ?? safeIS.dep ?? 0;
+                const netIncomeRaw = safeIS.netIncome ?? safeIS.netProfit ?? safeIS.profitAfterTax ?? safeIS.pat ?? safeIS.profit ?? null;
+                const netIncome = Number.isFinite(netIncomeRaw)
+                    ? netIncomeRaw
+                    : (Number.isFinite(revenue) && Number.isFinite(cogs)
+                        ? (revenue - cogs - (Number.isFinite(expenses) ? expenses : 0) - (Number.isFinite(depreciation) ? depreciation : 0) - (isData.zakat ?? 0))
+                        : null);
 
-            const grossMargin = Number.isFinite(grossProfit) && revenue ? (grossProfit / revenue) * 100 : null;
-            const operatingIncome = Number.isFinite(revenue) && Number.isFinite(cogs)
-                ? revenue - cogs - (Number.isFinite(expenses) ? expenses : 0)
-                : null;
-            const operatingMargin = Number.isFinite(operatingIncome) && revenue ? (operatingIncome / revenue) * 100 : null;
-            const netMargin = Number.isFinite(netIncome) && revenue ? (netIncome / revenue) * 100 : null;
-            const roa = Number.isFinite(netIncome) && assets ? (netIncome / assets) * 100 : null;
-            const roe = Number.isFinite(netIncome) && equity ? (netIncome / equity) * 100 : null;
-            const currentRatio = Number.isFinite(currentAssets) && Number.isFinite(currentLiabilities) && currentLiabilities !== 0
-                ? currentAssets / currentLiabilities
-                : null;
-            const quickNumerator = Number.isFinite(currentAssets)
-                ? currentAssets - (Number.isFinite(inventory) ? inventory : 0)
-                : null;
-            const quickRatio = Number.isFinite(quickNumerator) && Number.isFinite(currentLiabilities) && currentLiabilities !== 0
-                ? quickNumerator / currentLiabilities
-                : null;
-            const cashRatio = Number.isFinite(cashBank) && Number.isFinite(currentLiabilities) && currentLiabilities !== 0
-                ? cashBank / currentLiabilities
-                : null;
-            const debtToAssets = Number.isFinite(totalLiabilities) && Number.isFinite(assets) && assets !== 0
-                ? (totalLiabilities / assets) * 100
-                : null;
-            const debtToEquity = Number.isFinite(totalLiabilities) && Number.isFinite(equity) && equity !== 0
-                ? totalLiabilities / equity
-                : null;
-            const equityRatio = Number.isFinite(equity) && Number.isFinite(assets) && assets !== 0
-                ? (equity / assets) * 100
-                : null;
-            const assetTurnover = Number.isFinite(revenue) && Number.isFinite(assets) && assets !== 0 ? revenue / assets : null;
+                // تجميع تلقائي للأصول/الخصوم المتداولة إذا لم تتوفر الإجماليات
+                const autoCurrentAssets = sumKeys(bsData, ['cashBank', 'receivables', 'advancesOther', 'inventory', 'contractAssets']);
+                const autoCurrentLiabilities = sumKeys(bsData, [
+                    'payables',
+                    'otherCurrentLiabilities',
+                    'zakatTax',
+                    'contractLiabilities',
+                    'relatedPartyPayables',
+                ]);
+
+                const accumulatedDep = bsData.accumulatedDepreciation ?? bsData.accumDep ?? 0;
+                const nonCurrentAssets =
+                    (Number(bsData.propertyEquipment) || 0) - (accumulatedDep || 0) + (Number(bsData.otherNonCurrentAssets) || 0);
+                const nonCurrentLiabilities = (Number(bsData.employeeBenefits) || 0) + (Number(bsData.nonCurrentLiabilities) || 0);
+
+            const currentAssets =
+                bsData.currentAssets ??
+                bsData.currentAssetsTotal ??
+                (autoCurrentAssets !== 0 ? autoCurrentAssets : 0);
+            const currentLiabilities =
+                bsData.currentLiabilities ??
+                bsData.currentLiabilitiesTotal ??
+                (autoCurrentLiabilities !== 0 ? autoCurrentLiabilities : 0);
+
+            const totalAssets =
+                bsData.totalAssets ??
+                bsData.assetsTotal ??
+                bsData.assets ??
+                (Number.isFinite(currentAssets) ? currentAssets + nonCurrentAssets : 0);
+
+            const totalLiabilities =
+                bsData.totalLiabilities ??
+                bsData.liabilitiesTotal ??
+                (Number.isFinite(currentLiabilities) ? currentLiabilities + nonCurrentLiabilities : 0);
+
+                const assets = totalAssets;
+                const liabilities = totalLiabilities;
+
+            const equity =
+                bsData.equityTotal ??
+                bsData.equity ??
+                bsData.totalEquity ??
+                ((Number(bsData.equityCapital) || 0) +
+                    (Number(bsData.equityStatutoryReserve) || 0) +
+                    (Number(bsData.retainedEarnings) || 0));
+
+                const inventory = bsData.inventory ?? bsData.stocks ?? null;
+                const cashBank =
+                    bsData.cashBank ??
+                    bsData.cash ??
+                    bsData.cashAndCashEquivalents ??
+                    (autoCurrentAssets ? sumKeys(bsData, ['cashBank', 'cash', 'cashAndCashEquivalents']) : null);
+                const grossProfit = Number.isFinite(revenue) && Number.isFinite(cogs) ? revenue - cogs : null;
+
+                const grossMargin = Number.isFinite(grossProfit) && revenue ? (grossProfit / revenue) * 100 : null;
+                const operatingIncome = Number.isFinite(revenue) && Number.isFinite(cogs)
+                    ? revenue - cogs - (Number.isFinite(expenses) ? expenses : 0)
+                    : null;
+                const operatingMargin = Number.isFinite(operatingIncome) && revenue ? (operatingIncome / revenue) * 100 : null;
+                const netMargin = Number.isFinite(netIncome) && revenue ? (netIncome / revenue) * 100 : null;
+                const roa = Number.isFinite(netIncome) && assets ? (netIncome / assets) * 100 : null;
+                const roe = Number.isFinite(netIncome) && equity ? (netIncome / equity) * 100 : null;
+                const currentRatio = Number.isFinite(currentAssets) && Number.isFinite(currentLiabilities) && currentLiabilities !== 0
+                    ? currentAssets / currentLiabilities
+                    : null;
+                const quickNumerator = Number.isFinite(currentAssets)
+                    ? currentAssets - (Number.isFinite(inventory) ? inventory : 0)
+                    : null;
+                const quickRatio = Number.isFinite(quickNumerator) && Number.isFinite(currentLiabilities) && currentLiabilities !== 0
+                    ? quickNumerator / currentLiabilities
+                    : null;
+                const cashRatio = Number.isFinite(cashBank) && Number.isFinite(currentLiabilities) && currentLiabilities !== 0
+                    ? cashBank / currentLiabilities
+                    : null;
+                const debtToAssets = Number.isFinite(liabilities) && Number.isFinite(assets) && assets !== 0
+                    ? (liabilities / assets) * 100
+                    : null;
+                const debtToEquity = Number.isFinite(liabilities) && Number.isFinite(equity) && equity !== 0
+                    ? liabilities / equity
+                    : null;
+                const equityRatio = Number.isFinite(equity) && Number.isFinite(assets) && assets !== 0
+                    ? (equity / assets) * 100
+                    : null;
+                const assetTurnover = Number.isFinite(revenue) && Number.isFinite(assets) && assets !== 0 ? revenue / assets : null;
             const workingCapital = Number.isFinite(currentAssets) && Number.isFinite(currentLiabilities)
                 ? currentAssets - currentLiabilities
-                : null;
+                : 0;
 
-            map[y] = {
-                year: y,
-                revenue,
-                netIncome,
-                assets,
-                equity,
-                currentAssets,
-                currentLiabilities,
-                totalLiabilities,
-                inventory,
-                cashBank,
-                grossMargin,
-                operatingMargin,
-                netMargin,
-                roa,
-                roe,
-                currentRatio,
-                quickRatio,
-                cashRatio,
-                debtToAssets,
-                debtToEquity,
-                equityRatio,
-                assetTurnover,
-                workingCapital,
-            };
-        });
-        return map;
+                map[y] = {
+                    year: y,
+                    revenue,
+                    netIncome,
+                    assets,
+                    equity,
+                    currentAssets,
+                    currentLiabilities,
+                    totalLiabilities,
+                    inventory,
+                    cashBank,
+                    grossMargin,
+                    operatingMargin,
+                    netMargin,
+                    roa,
+                    roe,
+                    currentRatio,
+                    quickRatio,
+                    cashRatio,
+                    debtToAssets,
+                    debtToEquity,
+                    equityRatio,
+                    assetTurnover,
+                    workingCapital,
+                };
+            });
+            return map;
+        } catch (err) {
+            console.error('FinancialAnalysis yearData error', err);
+            return {};
+        }
     }, [historicalIS, historicalBS, data2025]);
 
     const availableYears = useMemo(() =>
@@ -539,6 +593,55 @@ export default function FinancialAnalysisReport({ financialSummary, financialRat
         return list;
     }, [latestData, latestYear, prevData, prevYear, historicalLeverageAvg]);
 
+    const actionPlan = useMemo(() => {
+        const cfo = [];
+        const ceo = [];
+        const y = latestData || {};
+
+        // سيولة ورأس مال عامل
+        if (Number.isFinite(y.currentRatio) && y.currentRatio < 1.2) {
+            cfo.push('رفع السيولة: خطة تحصيل مكثفة وتقليص آجال التحصيل + تمديد آجال الموردين دون كلفة عالية.');
+        }
+        if (Number.isFinite(y.quickRatio) && y.quickRatio < 1) {
+            cfo.push('تحسين النسبة السريعة: خفّض المخزون، وقيّد الشراء البطيء الدوران، وادعم النقدية/الذمم السريعة.');
+        }
+        if (Number.isFinite(y.workingCapital) && y.workingCapital < 0) {
+            cfo.push('رأس المال العامل سالب: أعد جدولة جزء من المطلوبات القصيرة إلى متوسطة الأجل فوراً.');
+        }
+
+        // ربحية وهوامش
+        if (Number.isFinite(y.netMargin) && y.netMargin < 0) {
+            cfo.push('هامش صافي الربح سلبي: راجع التسعير وخفّض بنود التكاليف الأعلى مساهمة خلال 30 يوم.');
+            ceo.push('اعتمد إعادة تسعير/إيقاف المشاريع أو المنتجات الخاسرة والتركيز على المزيج الأعلى ربحية.');
+        }
+        if (Number.isFinite(y.grossMargin) && y.grossMargin < 15) {
+            cfo.push('الهامش الإجمالي ضعيف: تفاوض على كلف الموردين وحدد سقف خصومات المبيعات.');
+        }
+
+        // هيكل التمويل والرفع
+        if (Number.isFinite(y.debtToEquity) && y.debtToEquity > 2) {
+            cfo.push('الرفع المالي مرتفع (>2×): أعد جدولة الديون القصيرة، وقلّل الاقتراض الجديد حتى تحسن الهوامش.');
+            ceo.push('ادعم مفاوضات إعادة الجدولة/تمويل بديل أقل كلفة لتقليل الضغط المالي.');
+        }
+        if (Number.isFinite(y.debtToAssets) && y.debtToAssets > 60) {
+            cfo.push('نسبة الديون إلى الأصول مرتفعة: راقب تدفقات السداد شهريًا وامنع التمويل القصير غير الضروري.');
+        }
+
+        // كفاءة الأصول والعائد
+        if (Number.isFinite(y.roa) && y.roa < 3) {
+            ceo.push('كفاءة الأصول منخفضة: ركّز الإنتاج/المبيعات على الأصول الأعلى عائداً، وقلّل الأصول غير المستغلة.');
+        }
+        if (Number.isFinite(y.assetTurnover) && y.assetTurnover < 0.5) {
+            ceo.push('معدل دوران الأصول ضعيف: زد الاستغلال التشغيلي أو تخلّ عن الأصول غير المستخدمة.');
+        }
+
+        // حوكمة البيانات والمتابعة
+        cfo.push('ثبّت لوحة متابعة شهرية: سيولة (WC, CR, QR)، مديونية (D/E, D/A)، هوامش (GP, OP, NP) مع حدود تنبيه.');
+        ceo.push('اعتمد اجتماع أداء شهري (CEO/CFO/عمليات) لقياس التقدم في التحصيل، خفض التكاليف، وتحسن الهوامش.');
+
+        return { cfo, ceo };
+    }, [latestData]);
+
     const handleExportExcel = () => {
         const tableExport = tableRows.map((row) => {
             const obj = { المؤشر: row.label, المعادلة: row.formula };
@@ -567,13 +670,7 @@ export default function FinancialAnalysisReport({ financialSummary, financialRat
         </div>
     );
 
-    if (availableYears.length === 0) {
-        return (
-            <div className="bg-white rounded-2xl border border-gray-100 p-6 text-center text-gray-600">
-                لا توجد بيانات مالية كافية لعرض التحليل. يرجى التأكد من تحميل ميزان المراجعة، قائمة الدخل، والمركز المالي.
-            </div>
-        );
-    }
+    const noData = availableYears.length === 0;
 
     const ratioData = useMemo(() => {
         const y = yearData[ratioYear] || {};
@@ -605,6 +702,12 @@ export default function FinancialAnalysisReport({ financialSummary, financialRat
 
     return (
         <div className="space-y-6">
+            {noData && (
+                <div className="bg-white rounded-2xl border border-gray-100 p-6 text-center text-gray-600">
+                    لا توجد بيانات مالية كافية لعرض التحليل. يرجى التأكد من تحميل ميزان المراجعة، قائمة الدخل، والمركز المالي.
+                </div>
+            )}
+
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                 <div className="flex items-center gap-3">
                     <TrendingUp className="text-blue-600" size={24} />
@@ -681,6 +784,32 @@ export default function FinancialAnalysisReport({ financialSummary, financialRat
                         </div>
                     );
                 })}
+            </div>
+
+            {/* توصيات تنفيذية (CFO / CEO) */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+                <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                        <div className="h-8 w-8 rounded-full bg-blue-50 text-blue-700 flex items-center justify-center text-sm font-semibold">CFO</div>
+                        <h3 className="text-base font-semibold text-gray-800">توصيات للمدير المالي</h3>
+                    </div>
+                    <ul className="list-disc list-inside space-y-1 text-sm text-gray-700 leading-relaxed">
+                        {actionPlan.cfo.map((item, idx) => (
+                            <li key={idx}>{item}</li>
+                        ))}
+                    </ul>
+                </div>
+                <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                        <div className="h-8 w-8 rounded-full bg-emerald-50 text-emerald-700 flex items-center justify-center text-sm font-semibold">CEO</div>
+                        <h3 className="text-base font-semibold text-gray-800">توصيات للمدير التنفيذي</h3>
+                    </div>
+                    <ul className="list-disc list-inside space-y-1 text-sm text-gray-700 leading-relaxed">
+                        {actionPlan.ceo.map((item, idx) => (
+                            <li key={idx}>{item}</li>
+                        ))}
+                    </ul>
+                </div>
             </div>
 
             {/* المديونية 2025 مقارنة بالمتوسط التاريخي */}

@@ -206,10 +206,6 @@ export default function ExecutiveReport() {
             <BarChart3 size={16} />
             <span>ميزان المراجعة</span>
           </button>
-          <button onClick={go('/analysis')} className="flex items-center gap-2 border border-gray-200 px-4 py-2 rounded-lg hover:bg-gray-100 text-gray-700">
-            <Activity size={16} />
-            <span>التحليل المالي</span>
-          </button>
         </div>
       </div>
 
@@ -248,92 +244,318 @@ export default function ExecutiveReport() {
         </div>
       </div>
 
-      {/* Cost and revenue distribution */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="bg-white p-5 rounded-xl shadow-sm">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="font-bold text-gray-800">توزيع الإيرادات</h3>
-            <span className="text-xs text-gray-500">مصدر واحد للبيانات: ميزان المراجعة (07)</span>
-          </div>
-          <div className="space-y-2">
-            {[{ label: 'المشاريع', val: revenueProjects, color: 'bg-blue-500' },
-              { label: 'إيرادات أخرى', val: revenueOther, color: 'bg-emerald-500' },
-              { label: 'أرباح رأسمالية', val: revenueCapital, color: 'bg-purple-500' }].map((item) => (
-                <div key={item.label}>
-                  <div className="flex justify-between text-sm text-gray-600">
-                    <span>{item.label}</span><span className="font-mono">{format(item.val)}</span>
-                  </div>
-                  <div className="h-2 bg-gray-100 rounded">
-                    <div className={`h-2 rounded ${item.color}`} style={{ width: `${curRevenue ? Math.min((item.val / curRevenue) * 100, 100) : 0}%` }} />
-                  </div>
-                </div>
-            ))}
-          </div>
-        </div>
+      {/* التحليل المالي (رقمي بدون رسوم) */}
+      {(() => {
+        const toneBadge = (tone, text) => {
+          const map = {
+            green: 'bg-emerald-50 text-emerald-700 border border-emerald-200',
+            yellow: 'bg-amber-50 text-amber-700 border border-amber-200',
+            red: 'bg-rose-50 text-rose-700 border border-rose-200',
+            gray: 'bg-gray-50 text-gray-700 border border-gray-200',
+          };
+          return <span className={`px-2 py-1 rounded text-xs font-semibold ${map[tone] || map.gray}`}>{text}</span>;
+        };
+        const pctChange = (cur, prev) => (prev ? ((cur - prev) / prev) * 100 : 0);
+        const dir = (v) => (v > 0 ? '↑' : v < 0 ? '↓' : '↔');
+        const fmtPct = (v) => `${(Number.isFinite(v) ? v : 0).toFixed(1)}%`;
+        const fmt = (v) => format(v);
 
-        <div className="bg-white p-5 rounded-xl shadow-sm">
+        const curGross = curIS?.grossProfit ?? (curIS?.revenue ?? curRevenue) - (curIS?.cogs ?? costOps);
+        const prevGross = prevIS?.grossProfit ?? (prevIS?.revenue ?? prevRevenue) - (prevIS?.cogs ?? prevIS?.cogs ?? 0);
+        const curOp = curIS?.mainOpsProfit ?? (curGross - (curIS?.expenses ?? costAdmin) - (curIS?.depreciation ?? costDep) - (curIS?.zakat ?? costZakat));
+        const prevOp = prevIS?.mainOpsProfit ?? ((prevIS?.grossProfit ?? prevGross) - (prevIS?.expenses ?? 0) - (prevIS?.depreciation ?? 0) - (prevIS?.zakat ?? 0));
+
+        const summaryRows = [
+          { label: 'الإيرادات', cur: curRevenue, prev: prevRevenue },
+          { label: 'مجمل الربح', cur: curGross, prev: prevGross },
+          { label: 'الربح التشغيلي', cur: curOp, prev: prevOp },
+          { label: 'صافي الربح / الخسارة', cur: curNetIncome, prev: prevNetIncomeCalc },
+        ].map((r) => {
+          const change = pctChange(r.cur, r.prev);
+          const tone = r.cur < 0 ? 'red' : change >= 0 ? 'green' : 'yellow';
+          const comment = (() => {
+            if (!Number.isFinite(change)) return 'لا توجد بيانات مقارنة كافية.';
+            if (r.label.includes('صافي الربح') && change < 0) {
+              return `صافي الربح انخفض بنسبة ${fmtPct(change)} بسبب ضغط التكاليف أو المصاريف التشغيلية.`;
+            }
+            return change >= 0 ? 'اتجاه إيجابي' : 'اتجاه يحتاج متابعة';
+          })();
+          return { ...r, change, tone, dir: dir(change), comment };
+        });
+
+        const marginRows = [
+          {
+            label: 'Gross Margin',
+            value: curRevenue ? (curGross / curRevenue) * 100 : 0,
+            eval: (v) => (v < 0 ? 'red' : v < 10 ? 'yellow' : 'green'),
+            meaning: 'كفاءة التسعير والتنفيذ',
+          },
+          {
+            label: 'Operating Margin',
+            value: curRevenue ? (curOp / curRevenue) * 100 : 0,
+            eval: (v) => (v < 0 ? 'red' : v < 10 ? 'yellow' : 'green'),
+            meaning: 'كفاءة التشغيل',
+          },
+          {
+            label: 'Net Profit Margin',
+            value: curRevenue ? (curNetIncome / curRevenue) * 100 : 0,
+            eval: (v) => (v < 0 ? 'red' : v < 10 ? 'yellow' : 'green'),
+            meaning: 'الربحية النهائية',
+          },
+        ];
+
+        const costToRevenue = curRevenue ? (costTotalTB / curRevenue) * 100 : 0;
+        const adminToRevenuePct = curRevenue ? (costAdmin / curRevenue) * 100 : 0;
+        const adminToGrossPct = curGross ? (costAdmin / curGross) * 100 : 0;
+
+        const currentAssets = curBS?.currentAssets ?? 0;
+        const currentLiabilities = curBS?.currentLiabilities ?? 0;
+        const quickAssets = (curBS?.cashBank ?? 0) + (curBS?.receivables ?? 0);
+        const totalLiabilities = curBS?.totalLiabilities ?? (curBS?.currentLiabilities ?? 0) + (curBS?.nonCurrentLiabilities ?? 0);
+        const equityTotal = curBS?.equityTotal ?? curBS?.equity ?? 0;
+        const totalAssets = curBS?.totalAssets ?? (equityTotal + totalLiabilities);
+        const workingCapital = currentAssets - currentLiabilities;
+
+        const liquidityRows = [
+          {
+            label: 'Current Ratio',
+            value: currentLiabilities ? currentAssets / currentLiabilities : 0,
+            eval: (v) => (v < 1 ? 'red' : v < 1.5 ? 'yellow' : v >= 2 ? 'green' : 'yellow'),
+            note: 'قدرة السداد قصيرة الأجل',
+          },
+          {
+            label: 'Quick Ratio',
+            value: currentLiabilities ? quickAssets / currentLiabilities : 0,
+            eval: (v) => (v < 1 ? 'red' : v < 1.5 ? 'yellow' : v >= 2 ? 'green' : 'yellow'),
+            note: 'سيولة فعلية (نقد + عملاء)',
+          },
+          {
+            label: 'Working Capital',
+            value: workingCapital,
+            eval: (v) => (v < 0 ? 'red' : 'green'),
+            note: 'الأصول المتداولة – الخصوم المتداولة',
+          },
+        ];
+
+        const solvencyRows = [
+          {
+            label: 'Debt to Equity',
+            value: equityTotal ? (totalLiabilities / equityTotal) : 0,
+            eval: (v) => (v > 1.5 ? 'red' : v > 1 ? 'yellow' : 'green'),
+            note: 'اعتماد على الديون',
+          },
+          {
+            label: 'Debt Ratio',
+            value: totalAssets ? (totalLiabilities / totalAssets) : 0,
+            eval: (v) => (v > 0.6 ? 'red' : v > 0.45 ? 'yellow' : 'green'),
+            note: 'إجمالي الخصوم ÷ إجمالي الأصول',
+          },
+        ];
+
+        const retained = curBS?.retainedEarnings ?? 0;
+        const capital = curBS?.equityCapital ?? 0;
+        const reserves = curBS?.equityStatutoryReserve ?? 0;
+        const roe = equityTotal ? (curNetIncome / equityTotal) * 100 : 0;
+
+        // Trial balance checks
+        let totalDebit = 0;
+        let totalCredit = 0;
+        const debitAccounts = [];
+        const creditAccounts = [];
+        nodeIndex?.forEach((node) => {
+          const d = node?.aggDebit ?? node?.debit ?? 0;
+          const c = node?.aggCredit ?? node?.credit ?? 0;
+          const bal = node?.aggBalance ?? node?.balance ?? 0;
+          totalDebit += d;
+          totalCredit += c;
+          if (bal > 0) debitAccounts.push({ code: node.code, name: node.name, val: bal });
+          if (bal < 0) creditAccounts.push({ code: node.code, name: node.name, val: bal });
+        });
+        debitAccounts.sort((a, b) => Math.abs(b.val) - Math.abs(a.val));
+        creditAccounts.sort((a, b) => Math.abs(b.val) - Math.abs(a.val));
+
+        const tbDiff = Math.abs(totalDebit - totalCredit);
+
+        const cashConversion = curNetIncome ? (operatingCF / curNetIncome) * 100 : 0;
+        const equityChange = (equityTotal - (prevBS?.equityTotal ?? prevBS?.equity ?? 0));
+        const profitVsEquity = equityChange - curNetIncome;
+
+        const finalComment = (() => {
+          const parts = [];
+          if (curNetIncome < 0) parts.push('الشركة حققت خسارة صافية خلال السنة الحالية.');
+          if (costToRevenue > 100) parts.push('تكلفة الإيرادات تتجاوز الإيرادات مما يضغط الربحية.');
+          if (operatingMargin < 0) parts.push('الهامش التشغيلي سلبي نتيجة ارتفاع المصاريف.');
+          if (liquidityRows[0].value < 1) parts.push('مؤشر السيولة الحالي أقل من 1 مما يعكس ضغط سيولة.');
+          if (parts.length === 0) return 'النتائج مستقرة إجمالاً مع هوامش مقبولة.';
+          return parts.join(' ');
+        })();
+
+        const renderTable = (title, rows, isPct = false, hasPrev = true) => (
+          <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="font-bold text-gray-800">توزيع التكاليف</h3>
-            <span className="text-xs text-gray-500">مصدر: ميزان المراجعة (06)</span>
+              <h3 className="font-bold text-gray-800">{title}</h3>
+              <span className="text-xs text-gray-500">تقييم رقمي بدون رسوم</span>
           </div>
-          <div className="space-y-2">
-            {[{ label: 'تشغيلية (0601)', val: costOps, color: 'bg-rose-500' },
-              { label: 'إدارية (0602)', val: costAdmin, color: 'bg-orange-500' },
-              { label: 'إهلاك (0604)', val: costDep, color: 'bg-indigo-500' },
-              { label: 'زكاة/ضريبة (0605)', val: costZakat, color: 'bg-amber-500' }].map((item) => (
-                <div key={item.label}>
-                  <div className="flex justify-between text-sm text-gray-600">
-                    <span>{item.label}</span><span className="font-mono">{format(item.val)}</span>
-                  </div>
-                  <div className="h-2 bg-gray-100 rounded">
-                    <div className={`h-2 rounded ${item.color}`} style={{ width: `${costTotalTB ? Math.min((item.val / costTotalTB) * 100, 100) : 0}%` }} />
-                  </div>
+            <div className="overflow-auto">
+              <table className="w-full text-sm text-right">
+                <thead>
+                  <tr className="text-gray-500 border-b">
+                    <th className="py-2 text-right">المؤشر</th>
+                    <th className="py-2 text-center">السنة الحالية</th>
+                    {hasPrev && <th className="py-2 text-center">السنة السابقة</th>}
+                    {hasPrev && <th className="py-2 text-center">التغير %</th>}
+                    <th className="py-2 text-center">التقييم</th>
+                    <th className="py-2 text-left">تعليق مختصر</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r, idx) => {
+                    const change = hasPrev ? pctChange(r.cur ?? r.value, r.prev ?? 0) : null;
+                    const val = r.cur ?? r.value ?? 0;
+                    const tone = typeof r.eval === 'function' ? r.eval(val) : r.tone || 'gray';
+                    const comment = r.comment || r.note || '';
+                    return (
+                      <tr key={idx} className="border-b last:border-0">
+                        <td className="py-2 font-medium text-gray-800">{r.label}</td>
+                        <td className="py-2 text-center font-mono">{isPct || r.isPct ? fmtPct(val) : fmt(val)}</td>
+                        {hasPrev && <td className="py-2 text-center font-mono">{r.prev !== undefined ? (isPct || r.isPct ? fmtPct(r.prev) : fmt(r.prev)) : '—'}</td>}
+                        {hasPrev && <td className="py-2 text-center font-mono">{Number.isFinite(change) ? fmtPct(change) : '—'}</td>}
+                        <td className="py-2 text-center">{toneBadge(tone, tone === 'green' ? '🟢' : tone === 'yellow' ? '🟡' : tone === 'red' ? '🔴' : '—')}</td>
+                        <td className="py-2 text-left text-xs text-gray-700">{comment}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
                 </div>
-            ))}
           </div>
-          <div className="mt-4">
-            <h4 className="font-semibold text-sm text-gray-700 mb-2">أعلى 5 بنود تكلفة</h4>
-            {topCosts.length === 0 ? (
-              <div className="text-xs text-gray-500">لا توجد بيانات مفصلة كافية.</div>
-            ) : (
-              <ul className="space-y-1 text-sm">
-                {topCosts.map((c) => (
-                  <li key={c.code} className="flex justify-between">
-                    <span className="text-gray-700">{c.code} - {c.name}</span>
-                    <span className={`font-mono ${c.value >= 0 ? 'text-gray-800' : 'text-red-600'}`}>{format(c.value)}</span>
+        );
+
+        return (
+          <div className="space-y-6">
+            {renderTable('ملخص الإدارة (60 ثانية)', summaryRows.map(r => ({
+              label: r.label,
+              cur: r.cur,
+              prev: r.prev,
+              comment: r.comment,
+              eval: () => r.tone,
+            })), false, true)}
+
+            {renderTable('مؤشرات الربحية الأساسية', marginRows.map(m => ({
+              label: m.label,
+              cur: m.value,
+              prev: prevRevenue ? (m.label === 'Gross Margin' ? ((prevGross / (prevRevenue || 1)) * 100) : m.label === 'Operating Margin' ? ((prevOp / (prevRevenue || 1)) * 100) : ((prevNetIncomeCalc / (prevRevenue || 1)) * 100)) : 0,
+              comment: m.label.includes('Net') && m.value < 0 ? 'خسائر تشغيلية/نهائية' : m.label.includes('Gross') && m.value < 10 ? 'ضغط تكاليف' : m.meaning,
+              eval: m.eval,
+              isPct: true,
+            })), true, true)}
+
+            {renderTable('تحليل التكلفة والمصاريف', [
+              {
+                label: 'Cost to Revenue Ratio',
+                cur: costToRevenue,
+                prev: prevRevenue ? ((prevIS?.cogs ?? 0) / (prevRevenue || 1)) * 100 : 0,
+                comment: `كل 1 ريال إيراد يكلف الشركة ${(costToRevenue / 100).toFixed(2)} ريال تنفيذ.`,
+                eval: (v) => (v > 100 ? 'red' : v > 80 ? 'yellow' : 'green'),
+                isPct: true,
+              },
+              {
+                label: 'المصاريف الإدارية ÷ الإيرادات',
+                cur: adminToRevenuePct,
+                prev: prevRevenue ? ((prevIS?.expenses ?? 0) / (prevRevenue || 1)) * 100 : 0,
+                comment: adminToRevenuePct > 20 ? 'المصاريف تلتهم جزءًا كبيرًا من الربح' : 'مستوى مقبول',
+                eval: (v) => (v > 25 ? 'red' : v > 15 ? 'yellow' : 'green'),
+                isPct: true,
+              },
+              {
+                label: 'المصاريف الإدارية ÷ مجمل الربح',
+                cur: adminToGrossPct,
+                prev: prevGross ? ((prevIS?.expenses ?? 0) / prevGross) * 100 : 0,
+                comment: adminToGrossPct > 40 ? 'مصروفات مرتفعة مقابل مجمل الربح' : 'مقبول',
+                eval: (v) => (v > 50 ? 'red' : v > 35 ? 'yellow' : 'green'),
+                isPct: true,
+              },
+            ], true, true)}
+
+            {renderTable('السيولة ورأس المال العامل', liquidityRows.map(r => ({
+              label: r.label,
+              cur: r.value,
+              prev: null,
+              comment: r.note,
+              eval: r.eval,
+              isPct: r.label !== 'Working Capital',
+            })), false, false)}
+
+            {renderTable('الملاءة المالية', solvencyRows.map(r => ({
+              label: r.label,
+              cur: r.value * 100,
+              prev: null,
+              comment: r.note,
+              eval: r.eval,
+              isPct: true,
+            })), true, false)}
+
+            {renderTable('حقوق الملكية', [
+              { label: 'صافي الربح المرحل', cur: retained, prev: prevBS?.retainedEarnings ?? 0, comment: 'أرباح/خسائر متراكمة', eval: (v) => (v < 0 ? 'red' : 'green') },
+              { label: 'رأس المال', cur: capital, prev: prevBS?.equityCapital ?? 0, comment: 'هيكل رأس المال', eval: () => 'gray' },
+              { label: 'الاحتياطيات', cur: reserves, prev: prevBS?.equityStatutoryReserve ?? 0, comment: 'احتياطي نظامي / اختياري', eval: () => 'gray' },
+              { label: 'ROE', cur: roe, prev: prevIS?.netIncome && (prevBS?.equityTotal ?? prevBS?.equity ?? 0) ? (prevIS?.netIncome / (prevBS?.equityTotal ?? prevBS?.equity ?? 1)) * 100 : 0, comment: 'عائد حقوق الملكية', eval: (v) => (v < 0 ? 'red' : v < 10 ? 'yellow' : 'green'), isPct: true },
+            ], false, true)}
+
+            {renderTable('صحة ميزان المراجعة', [
+              { label: 'إجمالي المدين', cur: totalDebit, prev: null, comment: 'يجب أن يساوي الدائن', eval: () => (tbDiff === 0 ? 'green' : 'red') },
+              { label: 'إجمالي الدائن', cur: totalCredit, prev: null, comment: 'يجب أن يساوي المدين', eval: () => (tbDiff === 0 ? 'green' : 'red') },
+              { label: 'فرق المدين/الدائن', cur: tbDiff, prev: null, comment: tbDiff === 0 ? 'مطابق' : 'يحتاج تسوية', eval: () => (tbDiff === 0 ? 'green' : 'red') },
+            ], false, false)}
+
+            <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100">
+          <div className="flex items-center justify-between mb-3">
+                <h3 className="font-bold text-gray-800">تركّز الأرصدة (أعلى 5)</h3>
+                <span className="text-xs text-gray-500">بدون رسوم بيانية</span>
+          </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                <div>
+                  <h4 className="font-semibold text-gray-700 mb-2">أكبر حسابات مدينة</h4>
+                  <ul className="space-y-1">
+                    {debitAccounts.slice(0, 5).map((a) => (
+                      <li key={a.code} className="flex justify-between">
+                        <span className="text-gray-700">{a.code} - {a.name}</span>
+                        <span className="font-mono text-gray-800">{fmt(Math.abs(a.val))}</span>
+                      </li>
+                    ))}
+                    {debitAccounts.length === 0 && <li className="text-gray-500 text-xs">لا توجد بيانات</li>}
+                  </ul>
+                </div>
+                <div>
+                  <h4 className="font-semibold text-gray-700 mb-2">أكبر حسابات دائنة</h4>
+                  <ul className="space-y-1">
+                    {creditAccounts.slice(0, 5).map((a) => (
+                      <li key={a.code} className="flex justify-between">
+                        <span className="text-gray-700">{a.code} - {a.name}</span>
+                        <span className="font-mono text-gray-800">{fmt(Math.abs(a.val))}</span>
                   </li>
                 ))}
+                    {creditAccounts.length === 0 && <li className="text-gray-500 text-xs">لا توجد بيانات</li>}
               </ul>
-            )}
           </div>
         </div>
       </div>
 
-      {/* Ratios */}
-      <div className="bg-white p-5 rounded-xl shadow-sm">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="font-bold text-gray-800">المؤشرات المالية</h3>
-          <span className="text-xs text-gray-500">المصدر: IS + BS + TB</span>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          {[
-            { label: 'هامش صافي الربح', value: netMargin, good: netMargin >= 10 },
-            { label: 'هامش تشغيلي', value: operatingMargin, good: operatingMargin >= 12 },
-            { label: 'مصروفات إدارية / إيرادات', value: adminToRevenue, good: adminToRevenue <= 12 },
-            { label: 'التكاليف / الإيرادات', value: costToRevenue, good: costToRevenue <= 70 },
-            { label: 'حرق/توليد نقد تشغيلي', value: cashBurn, good: cashBurn >= 0 },
-            { label: 'نمو الإيرادات', value: revenueGrowth, good: revenueGrowth >= 0 },
-          ].map((r) => (
-            <div key={r.label} className={`p-4 rounded-lg border ${r.good ? 'border-emerald-100 bg-emerald-50' : 'border-rose-100 bg-rose-50'}`}>
-              <div className="text-sm text-gray-600">{r.label}</div>
-              <div className="text-xl font-bold text-gray-800 mt-1">{formatPct(r.value)}</div>
-              <div className="text-xs mt-1 text-gray-500">
-                {r.good ? 'ضمن النطاق المقبول' : 'يحتاج إلى تحسّن'}
+            {renderTable('الربط بين القوائم', [
+              { label: 'Cash Conversion (OCF ÷ Net Income)', cur: cashConversion, prev: null, comment: cashConversion < 0 ? 'ربح ورقي/ضغط سيولة' : 'تحول نقدي جيد', eval: (v) => (v < 0 ? 'red' : v < 80 ? 'yellow' : 'green'), isPct: true },
+              { label: 'التغير في حقوق الملكية – صافي الربح', cur: profitVsEquity, prev: null, comment: profitVsEquity < 0 ? 'حقوق الملكية لا تعكس الربح (توزيعات/خسائر)' : 'متوافق مع الربح', eval: (v) => (v < 0 ? 'yellow' : 'green') },
+            ], false, false)}
+
+            <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-xl p-4 text-sm leading-6">
+              <div className="font-bold mb-1">تفسير نهائي آلي</div>
+              <p>{finalComment}</p>
+              <div className="mt-2">
+                🔧 اقتراح تنفيذي: خفّض تكلفة الإيرادات والمصاريف التشغيلية لتحسين الهوامش، وراقب السيولة عبر رفع Current Ratio لأعلى من 1.5.
               </div>
             </div>
-          ))}
         </div>
-      </div>
+        );
+      })()}
 
       {/* Insights & recommendations */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

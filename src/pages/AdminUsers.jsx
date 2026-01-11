@@ -1,35 +1,38 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { usersAPI, auditAPI } from '../api/client';
 
 const PAGE_SIZE = 8;
 
-const permissionGroups = [
-  {
-    key: 'user_mgmt',
-    label: 'إدارة المستخدمين',
-    keys: ['add_user', 'edit_user', 'disable_user', 'reset_password', 'manage_permissions'],
-  },
-  { key: 'financial', label: 'Financial Center', keys: ['view_reports', 'export_data'] },
-  { key: 'analytics', label: 'Analytics', keys: ['analytics_view'] },
-  { key: 'settings', label: 'Settings', keys: ['settings_manage'] },
+const pagePermissions = [
+  { key: 'dashboard', label: 'الرئيسية' },
+  { key: 'income', label: 'قائمة الدخل' },
+  { key: 'balance', label: 'المركز المالي' },
+  { key: 'cash', label: 'التدفقات النقدية' },
+  { key: 'trial', label: 'ميزان المراجعة' },
+  { key: 'executive', label: 'التقرير التنفيذي' },
+  { key: 'admin', label: 'إدارة المستخدمين' },
 ];
 
 const roleDefaults = {
-  admin: permissionGroups.flatMap((g) => g.keys),
-  manager: ['add_user', 'edit_user', 'disable_user', 'reset_password', 'view_reports'],
-  user: ['view_reports'],
+  admin: pagePermissions.map((p) => p.key),
+  manager: ['dashboard', 'income', 'balance', 'cash', 'trial', 'executive'],
+  user: ['dashboard', 'income', 'balance', 'cash', 'trial'],
   custom: [],
 };
 
 export default function AdminUsers() {
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('users');
 
   const [users, setUsers] = useState([]);
   const [usersLoading, setUsersLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterRole, setFilterRole] = useState('');
-  const [filterStatus, setFilterStatus] = useState('');
+  const [filterStatus, setFilterStatus] = useState('active'); // إظهار المفعّل افتراضياً
   const [filterDept, setFilterDept] = useState('');
+  const [sortKey, setSortKey] = useState('name');
+  const [sortDir, setSortDir] = useState('asc');
   const [page, setPage] = useState(1);
 
   const [createForm, setCreateForm] = useState({
@@ -38,13 +41,6 @@ export default function AdminUsers() {
     name: '',
     password: '',
     role: 'user',
-    department: '',
-    jobTitle: '',
-    phone: '',
-    status: 'active',
-    disableReason: '',
-    tempPassword: '',
-    forceChange: true,
   });
   const [editingId, setEditingId] = useState(null);
   const [createStatus, setCreateStatus] = useState('idle');
@@ -66,9 +62,13 @@ export default function AdminUsers() {
   const [savingId, setSavingId] = useState(null);
   const [togglingId, setTogglingId] = useState(null);
   const [resettingId, setResettingId] = useState(null);
+  const [activatingId, setActivatingId] = useState(null);
+  const [authExpired, setAuthExpired] = useState(false);
+  const [authErrorMsg, setAuthErrorMsg] = useState('');
+  const [exporting, setExporting] = useState(false);
 
   const filteredUsers = useMemo(() => {
-    return (users || []).filter((u) => {
+    const list = (users || []).filter((u) => {
       if (filterRole && u.role !== filterRole) return false;
       if (filterStatus && u.status !== filterStatus) return false;
       if (filterDept && (u.department || '').toLowerCase() !== filterDept.toLowerCase()) return false;
@@ -77,15 +77,36 @@ export default function AdminUsers() {
       return (
         (u.name || '').toLowerCase().includes(q) ||
         (u.email || '').toLowerCase().includes(q) ||
-        (u.username || '').toLowerCase().includes(q)
+        (u.username || '').toLowerCase().includes(q) ||
+        (u.phone || '').toLowerCase().includes(q)
       );
     });
+    const sorted = [...list].sort((a, b) => {
+      const dir = sortDir === 'asc' ? 1 : -1;
+      if (sortKey === 'lastLogin') {
+        return dir * ((new Date(a.lastLogin || 0)) - (new Date(b.lastLogin || 0)));
+      }
+      if (sortKey === 'createdAt') {
+        return dir * ((new Date(a.createdAt || 0)) - (new Date(b.createdAt || 0)));
+      }
+      return dir * String(a[sortKey] || '').localeCompare(String(b[sortKey] || ''));
+    });
+    return sorted;
   }, [users, search, filterRole, filterStatus, filterDept]);
 
   const totalPages = Math.max(1, Math.ceil(filteredUsers.length / PAGE_SIZE));
   const pageUsers = filteredUsers.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-  const loadUsers = async () => {
+  const handleAuthError = (err) => {
+    if (err?.response?.status === 401) {
+      setAuthExpired(true);
+      setAuthErrorMsg('انتهت صلاحية الجلسة، فضلاً سجّل الدخول مرة أخرى');
+      return true;
+    }
+    return false;
+  };
+
+  const loadUsers = async (returnList = false) => {
     try {
       setUsersLoading(true);
       const res = await usersAPI.list({
@@ -99,10 +120,14 @@ export default function AdminUsers() {
         allowAll: !u.allowedPages || u.allowedPages.length === 0,
         allowedPages: Array.isArray(u.allowedPages) ? u.allowedPages : [],
         lastLogin: u.lastLogin || null,
+        mfaEnabled: u.mfaEnabled ?? false,
       }));
       setUsers(normalized);
+      if (returnList) return normalized;
     } catch (err) {
+      if (handleAuthError(err)) return;
       setUsers([]);
+      if (returnList) return [];
     } finally {
       setUsersLoading(false);
     }
@@ -114,6 +139,7 @@ export default function AdminUsers() {
       const res = await auditAPI.list({ limit: 100 });
       setLogs(res.logs || []);
     } catch (e) {
+      if (handleAuthError(e)) return;
       setLogs([]);
     } finally {
       setLogsLoading(false);
@@ -133,13 +159,6 @@ export default function AdminUsers() {
       name: '',
       password: '',
       role: 'user',
-      department: '',
-      jobTitle: '',
-      phone: '',
-      status: 'active',
-      disableReason: '',
-      tempPassword: '',
-      forceChange: true,
     });
     setEditingId(null);
   };
@@ -149,52 +168,56 @@ export default function AdminUsers() {
     try {
       setCreateError('');
       setCreateStatus('saving');
-      // تحقق مبكر قبل الإرسال لتجنب أخطاء الحفظ
-      const requiredNew =
-        !editingId &&
-        (!createForm.tempPassword || !createForm.tempPassword.trim());
-      if (!createForm.email || !createForm.username || !createForm.name) {
-        setCreateError('الاسم والبريد واسم المستخدم مطلوبة');
+      const name = createForm.name.trim();
+      const email = createForm.email.trim();
+      const username = (createForm.username || '').trim() || email;
+      const password = createForm.password;
+
+      // تحقق مبكر: الاسم + البريد (اسم المستخدم) + كلمة المرور (للمستخدم الجديد) + الدور
+      if (!name || !username || !email) {
+        setCreateError('الاسم والبريد مطلوبة');
         setCreateStatus('error');
         setTimeout(() => setCreateStatus('idle'), 2000);
         return;
       }
-      if (!editingId && requiredNew) {
-        setCreateError('الرجاء إدخال كلمة مرور مؤقتة للمستخدم الجديد');
+      if (!editingId && !password) {
+        setCreateError('الرجاء إدخال كلمة مرور للمستخدم الجديد');
         setCreateStatus('error');
         setTimeout(() => setCreateStatus('idle'), 2000);
         return;
       }
       if (editingId) {
         await usersAPI.updateUser(editingId, {
-          name: createForm.name,
-          email: createForm.email,
-          username: createForm.username,
-          department: createForm.department,
-          jobTitle: createForm.jobTitle,
-          phone: createForm.phone,
+          name,
+          email,
+          username,
           role: createForm.role,
-          status: createForm.status,
-          disableReason: createForm.status === 'inactive' ? createForm.disableReason : null,
         });
       } else {
         await usersAPI.create({
-          email: createForm.email,
-          username: createForm.username,
-          name: createForm.name,
-          password: createForm.tempPassword || createForm.password,
+          email,
+          username,
+          name,
+          password,
           role: createForm.role,
-          department: createForm.department,
-          jobTitle: createForm.jobTitle,
-          phone: createForm.phone,
-          status: createForm.status,
+          status: 'active',
         });
       }
       setCreateStatus('ok');
       resetCreateForm();
-      await loadUsers();
+      const latest = await loadUsers(true);
+      // فرض تغيير كلمة المرور عند أول دخول (محاولة لاحقة)
+      const created = (latest || []).find((u) => u.email === email);
+      if (created) {
+        try {
+          await usersAPI.resetPasswordAdmin(created.id, { newPassword: password, forceChange: true });
+        } catch (e) {
+          // تجاهل لو فشل
+        }
+      }
       setTimeout(() => setCreateStatus('idle'), 1200);
     } catch (err) {
+      if (handleAuthError(err)) return;
       const msg = err?.response?.data?.error || err?.message || 'تعذر الحفظ';
       setCreateError(msg);
       setCreateStatus('error');
@@ -211,14 +234,7 @@ export default function AdminUsers() {
       username: u.username || '',
       name: u.name || '',
       password: '',
-      tempPassword: '',
       role: u.role || 'user',
-      department: u.department || '',
-      jobTitle: u.jobTitle || '',
-      phone: u.phone || '',
-      status: u.status || 'active',
-      disableReason: u.disableReason || '',
-      forceChange: true,
     }));
   };
 
@@ -231,6 +247,7 @@ export default function AdminUsers() {
       await usersAPI.updateStatus(u.id, { status: next, reason });
       await loadUsers();
     } catch (err) {
+      if (handleAuthError(err)) return;
       alert('تعذر تحديث الحالة');
     } finally {
       setTogglingId(null);
@@ -246,18 +263,50 @@ export default function AdminUsers() {
       await usersAPI.logoutAll(u.id);
       await loadUsers();
     } catch (err) {
+      if (handleAuthError(err)) return;
       alert('تعذر تغيير كلمة المرور');
     } finally {
       setResettingId(null);
     }
   };
 
+  const handleActivateAndSetPassword = async (u) => {
+    const pwd = window.prompt('أدخل كلمة مرور جديدة لهذا الحساب:', '');
+    if (!pwd) return;
+    try {
+      setActivatingId(u.id);
+      await usersAPI.updateStatus(u.id, { status: 'active', reason: null });
+      await usersAPI.resetPasswordAdmin(u.id, { newPassword: pwd, forceChange: true });
+      await usersAPI.updatePermissions(u.id, { allowedPages: [] }); // كل الصفحات
+      await loadUsers();
+      alert('تم تفعيل الحساب وتعيين كلمة المرور ومنح جميع الصفحات.');
+    } catch (err) {
+      if (handleAuthError(err)) return;
+      alert('تعذر تفعيل الحساب أو تعيين كلمة المرور');
+    } finally {
+      setActivatingId(null);
+    }
+  };
+
+  const handleSetMfaEnabled = async (u) => {
+    try {
+      setSavingId(u.id);
+      await usersAPI.updateUser(u.id, { mfaEnabled: true });
+      await loadUsers();
+      alert('تم تفعيل المصادقة الثنائية لهذا المستخدم.');
+    } catch (err) {
+      if (handleAuthError(err)) return;
+      alert('تعذر تفعيل المصادقة الثنائية');
+    } finally {
+      setSavingId(null);
+    }
+  };
+
   const handlePermissionsOpen = (u) => {
     setPermUser(u);
     setActiveTab('permissions');
-    const base = u.role === 'custom' ? u.permissions || [] : roleDefaults[u.role] || [];
-    const custom = u.role === 'custom' ? u.permissions || [] : [];
-    const merged = new Set([...(u.allowedPages || []), ...base, ...custom]);
+    const base = roleDefaults[u.role] || [];
+    const merged = new Set([...(u.allowedPages || []), ...base]);
     setPermRole(u.role || 'custom');
     setPermChecked(Array.from(merged));
   };
@@ -266,11 +315,28 @@ export default function AdminUsers() {
     if (!permUser) return;
     try {
       setPermStatus('saving');
-      if (permRole === 'custom') {
-        await usersAPI.setCustomPermissions(permUser.id, { role: 'custom', permissions: permChecked });
-      } else {
-        await usersAPI.setCustomPermissions(permUser.id, { role: permRole, permissions: roleDefaults[permRole] || [] });
+      // تحديث الدور إن تغيّر
+      if (permRole && permRole !== permUser.role) {
+        await usersAPI.updateUser(permUser.id, { role: permRole });
       }
+      // تحديث الصفحات المسموحة
+      await usersAPI.updatePermissions(permUser.id, { allowedPages: permChecked });
+      await loadUsers();
+      setPermStatus('ok');
+      setTimeout(() => setPermStatus('idle'), 1200);
+    } catch (err) {
+      if (handleAuthError(err)) return;
+      setPermStatus('error');
+      setTimeout(() => setPermStatus('idle'), 2000);
+    }
+  };
+
+  const handleAllowAllPages = async () => {
+    if (!permUser) return;
+    try {
+      setPermStatus('saving');
+      // إرسال قائمة فارغة يعني السماح بكل الصفحات
+      await usersAPI.updatePermissions(permUser.id, { allowedPages: [] });
       await loadUsers();
       setPermStatus('ok');
       setTimeout(() => setPermStatus('idle'), 1200);
@@ -281,7 +347,7 @@ export default function AdminUsers() {
   };
 
   const handlePermissionsSelectAll = () => {
-    const all = permissionGroups.flatMap((g) => g.keys);
+    const all = pagePermissions.map((p) => p.key);
     setPermChecked(all);
   };
 
@@ -327,8 +393,64 @@ export default function AdminUsers() {
     setRefreshing(false);
   };
 
+  const handleExport = async () => {
+    try {
+      setExporting(true);
+      const rows = users.map((u) => ({
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        role: u.role,
+        status: u.status,
+        allowedPages: u.allowAll ? 'ALL' : (u.allowedPages || []).join('|'),
+        lastLogin: u.lastLogin || '',
+      }));
+      const header = 'id,name,email,role,status,allowedPages,lastLogin';
+      const csv = [header, ...rows.map((r) => `${r.id},${r.name},${r.email},${r.role},${r.status},"${r.allowedPages}",${r.lastLogin}`)].join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', 'users-export.csv');
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const stats = useMemo(() => {
+    const total = users.length;
+    const active = users.filter((u) => u.status === 'active').length;
+    const inactive = users.filter((u) => u.status !== 'active').length;
+    const admins = users.filter((u) => u.role === 'admin').length;
+    const managers = users.filter((u) => u.role === 'manager').length;
+    const custom = users.filter((u) => u.role === 'custom').length;
+    return { total, active, inactive, admins, managers, custom };
+  }, [users]);
+
+  const formatDate = (dt) => {
+    if (!dt) return '—';
+    try {
+      return new Date(dt).toLocaleString('ar-EG');
+    } catch {
+      return dt;
+    }
+  };
+
   const renderUsersTable = () => (
     <div className="space-y-4">
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-2 text-sm">
+        <div className="p-3 rounded-lg bg-blue-50 border border-blue-100 text-blue-800 font-semibold">إجمالي: {stats.total}</div>
+        <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-100 text-emerald-800 font-semibold">نشط: {stats.active}</div>
+        <div className="p-3 rounded-lg bg-rose-50 border border-rose-100 text-rose-800 font-semibold">موقوف: {stats.inactive}</div>
+        <div className="p-3 rounded-lg bg-purple-50 border border-purple-100 text-purple-800 font-semibold">Admins: {stats.admins}</div>
+        <div className="p-3 rounded-lg bg-amber-50 border border-amber-100 text-amber-800 font-semibold">Managers: {stats.managers}</div>
+        <div className="p-3 rounded-lg bg-gray-50 border border-gray-200 text-gray-700 font-semibold">Custom: {stats.custom}</div>
+      </div>
+
       <div className="flex flex-wrap items-center gap-2">
         <input
           type="search"
@@ -394,8 +516,17 @@ export default function AdminUsers() {
               <th className="px-3 py-2 text-right font-semibold">اسم المستخدم (البريد)</th>
               <th className="px-3 py-2 text-right font-semibold">القسم</th>
               <th className="px-3 py-2 text-right font-semibold">الدور</th>
+              <th className="px-3 py-2 text-right font-semibold">الصلاحيات</th>
+              <th className="px-3 py-2 text-right font-semibold">MFA</th>
               <th className="px-3 py-2 text-right font-semibold">الحالة</th>
-              <th className="px-3 py-2 text-right font-semibold whitespace-nowrap">آخر تسجيل دخول</th>
+              <th className="px-3 py-2 text-right font-semibold whitespace-nowrap">
+                <button onClick={() => {
+                  setSortKey('lastLogin');
+                  setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
+                }} className="flex items-center gap-1">
+                  آخر تسجيل دخول
+                </button>
+              </th>
               <th className="px-3 py-2 text-center font-semibold whitespace-nowrap">الإجراءات</th>
             </tr>
           </thead>
@@ -414,13 +545,28 @@ export default function AdminUsers() {
                 </td>
                 <td className="px-3 py-2 text-gray-700">{u.email}</td>
                 <td className="px-3 py-2 text-gray-700">{u.department || '—'}</td>
-                <td className="px-3 py-2 text-gray-700">{u.role}</td>
+                <td className="px-3 py-2 text-gray-700">
+                  <span className={`px-2 py-1 rounded-full text-xs ${u.role === 'admin' ? 'bg-purple-50 text-purple-700' : u.role === 'manager' ? 'bg-amber-50 text-amber-700' : u.role === 'custom' ? 'bg-blue-50 text-blue-700' : 'bg-gray-100 text-gray-700'}`}>
+                    {u.role}
+                  </span>
+                </td>
+                <td className="px-3 py-2 text-gray-700">
+                  {u.allowAll ? 'كل الصفحات' : `${u.allowedPages.length} صفحة مسموحة`}
+                </td>
+                <td className="px-3 py-2">
+                  <span className={`px-2 py-1 rounded-full text-xs ${u.mfaEnabled ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-100 text-gray-600'}`}>
+                    {u.mfaEnabled ? 'مفعل' : 'غير مفعل'}
+                  </span>
+                </td>
                 <td className="px-3 py-2">
                   <span className={`px-2 py-1 rounded-full text-xs ${u.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
                     {u.status === 'active' ? 'Active' : 'Inactive'}
                   </span>
+                  {u.status !== 'active' && u.disableReason && (
+                    <div className="text-[11px] text-gray-500 mt-1">سبب: {u.disableReason}</div>
+                  )}
                 </td>
-                <td className="px-3 py-2 text-gray-500 text-xs">{u.lastLogin || '—'}</td>
+                <td className="px-3 py-2 text-gray-500 text-xs">{formatDate(u.lastLogin)}</td>
                 <td className="px-3 py-2 text-center">
                   <div className="flex flex-wrap items-center justify-center gap-2">
                     <button onClick={() => handleEditUser(u)} className="text-xs bg-blue-50 text-blue-700 px-2.5 py-1 rounded-lg border border-blue-100 hover:bg-blue-100">تعديل</button>
@@ -429,6 +575,12 @@ export default function AdminUsers() {
                       {u.status === 'active' ? 'إيقاف' : 'تفعيل'}
                     </button>
                     <button onClick={() => handlePermissionsOpen(u)} className="text-xs bg-purple-50 text-purple-700 px-2.5 py-1 rounded-lg border border-purple-100 hover:bg-purple-100">الصلاحيات</button>
+                    <button onClick={() => handleActivateAndSetPassword(u)} disabled={activatingId === u.id} className="text-xs bg-indigo-50 text-indigo-700 px-2.5 py-1 rounded-lg border border-indigo-100 hover:bg-indigo-100">
+                      {activatingId === u.id ? '...' : 'تفعيل + كلمة مرور + كل الصفحات'}
+                    </button>
+                    <button onClick={() => handleSetMfaEnabled(u)} disabled={savingId === u.id} className="text-xs bg-teal-50 text-teal-700 px-2.5 py-1 rounded-lg border border-teal-100 hover:bg-teal-100">
+                      {savingId === u.id ? '...' : 'تفعيل MFA'}
+                    </button>
                   </div>
                 </td>
               </tr>
@@ -453,7 +605,7 @@ export default function AdminUsers() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-semibold text-gray-800">{editingId ? 'تعديل مستخدم' : 'إنشاء مستخدم جديد'}</h2>
-          <p className="text-sm text-gray-500">الحقول الأساسية والعملية</p>
+          <p className="text-sm text-gray-500">الحقول المطلوبة: الاسم، البريد (اسم الدخول)، كلمة المرور، الصلاحية</p>
         </div>
         {editingId && (
           <button onClick={resetCreateForm} className="text-sm text-blue-600 hover:text-blue-700">إلغاء التعديل</button>
@@ -473,61 +625,33 @@ export default function AdminUsers() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div>
             <label className="text-sm text-gray-700">البريد الإلكتروني</label>
-            <input type="email" className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400" value={createForm.email} onChange={(e) => setCreateForm((p) => ({ ...p, email: e.target.value }))} required />
-          </div>
-          <div>
-            <label className="text-sm text-gray-700">رقم الجوال (اختياري)</label>
-            <input type="text" className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400" value={createForm.phone} onChange={(e) => setCreateForm((p) => ({ ...p, phone: e.target.value }))} />
-          </div>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div>
-            <label className="text-sm text-gray-700">القسم</label>
-            <input type="text" className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400" value={createForm.department} onChange={(e) => setCreateForm((p) => ({ ...p, department: e.target.value }))} />
-          </div>
-          <div>
-            <label className="text-sm text-gray-700">المسمى الوظيفي</label>
-            <input type="text" className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400" value={createForm.jobTitle} onChange={(e) => setCreateForm((p) => ({ ...p, jobTitle: e.target.value }))} />
+            <input
+              type="email"
+              className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400"
+              value={createForm.email}
+              onChange={(e) => {
+                const val = e.target.value;
+                setCreateForm((p) => ({ ...p, email: val, username: p.username || val }));
+              }}
+              required
+            />
           </div>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div>
-            <label className="text-sm text-gray-700">الدور</label>
-            <select className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400 bg-white" value={createForm.role} onChange={(e) => setCreateForm((p) => ({ ...p, role: e.target.value }))}>
-              <option value="admin">Admin</option>
-              <option value="manager">Manager</option>
-              <option value="user">User</option>
-              <option value="custom">Custom</option>
-            </select>
-          </div>
-          <div>
-            <label className="text-sm text-gray-700">الحالة</label>
-            <select className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400 bg-white" value={createForm.status} onChange={(e) => setCreateForm((p) => ({ ...p, status: e.target.value }))}>
-              <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
-            </select>
-          </div>
-        </div>
-        {createForm.status === 'inactive' && (
-          <div>
-            <label className="text-sm text-gray-700">سبب الإيقاف (إجباري عند الإيقاف)</label>
-            <input type="text" className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400" value={createForm.disableReason} onChange={(e) => setCreateForm((p) => ({ ...p, disableReason: e.target.value }))} />
-          </div>
-        )}
         {!editingId && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div>
-              <label className="text-sm text-gray-700">كلمة مرور مؤقتة</label>
-              <input type="password" className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400" value={createForm.tempPassword} onChange={(e) => setCreateForm((p) => ({ ...p, tempPassword: e.target.value }))} />
-            </div>
-            <div className="flex items-end gap-2">
-              <label className="flex items-center gap-2 text-sm text-gray-700">
-                <input type="checkbox" className="h-4 w-4" checked={createForm.forceChange} onChange={(e) => setCreateForm((p) => ({ ...p, forceChange: e.target.checked }))} />
-                إجبار تغيير كلمة المرور عند أول تسجيل دخول
-              </label>
-            </div>
+          <div>
+            <label className="text-sm text-gray-700">كلمة المرور</label>
+            <input type="password" className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400" value={createForm.password} onChange={(e) => setCreateForm((p) => ({ ...p, password: e.target.value }))} required />
           </div>
         )}
+        <div>
+          <label className="text-sm text-gray-700">الصلاحية (الدور)</label>
+          <select className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400 bg-white" value={createForm.role} onChange={(e) => setCreateForm((p) => ({ ...p, role: e.target.value }))}>
+            <option value="admin">Admin</option>
+            <option value="manager">Manager</option>
+            <option value="user">User</option>
+            <option value="custom">Custom</option>
+          </select>
+        </div>
         <div className="pt-2">
           <button type="submit" disabled={createStatus === 'saving'} className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition disabled:opacity-60">
             {createStatus === 'saving' ? 'جاري الحفظ...' : editingId ? 'تحديث المستخدم' : 'إنشاء المستخدم'}
@@ -623,20 +747,16 @@ export default function AdminUsers() {
       <div className="flex items-center gap-2 text-sm">
         <button onClick={handlePermissionsSelectAll} className="px-3 py-1.5 border border-gray-200 rounded-lg hover:bg-gray-50">تحديد الكل</button>
         <button onClick={handlePermissionsClear} className="px-3 py-1.5 border border-gray-200 rounded-lg hover:bg-gray-50">مسح الكل</button>
+        <button onClick={handleAllowAllPages} disabled={!permUser || permStatus === 'saving'} className="px-3 py-1.5 border border-emerald-200 text-emerald-700 rounded-lg hover:bg-emerald-50 disabled:opacity-60">
+          منح كل الصفحات (Full Access)
+        </button>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-        {permissionGroups.map((group) => (
-          <div key={group.key} className="border border-gray-200 rounded-lg p-3">
-            <h4 className="text-sm font-semibold text-gray-800 mb-2">{group.label}</h4>
-            <div className="space-y-2">
-              {group.keys.map((k) => (
-                <label key={k} className="flex items-center gap-2 text-sm text-gray-700">
-                  <input type="checkbox" className="h-4 w-4" checked={permChecked.includes(k)} onChange={() => handlePermissionsToggle(k)} />
-                  {k}
-                </label>
-              ))}
-            </div>
-          </div>
+        {pagePermissions.map((p) => (
+          <label key={p.key} className="flex items-center gap-2 text-sm text-gray-700 border border-gray-200 rounded-lg px-3 py-2">
+            <input type="checkbox" className="h-4 w-4" checked={permChecked.includes(p.key)} onChange={() => handlePermissionsToggle(p.key)} />
+            <span>{p.label}</span>
+          </label>
         ))}
       </div>
       <div className="pt-2">
@@ -701,12 +821,24 @@ export default function AdminUsers() {
 
   return (
     <div className="p-6 space-y-6 bg-gray-50 min-h-screen" dir="rtl">
+      {authExpired && authErrorMsg && (
+        <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm">
+          {authErrorMsg} — الرجاء إعادة تسجيل الدخول من صفحة تسجيل الدخول.
+        </div>
+      )}
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
           <h1 className="text-3xl font-bold text-blue-900">إدارة المستخدمين</h1>
           <p className="text-sm text-gray-600 mt-1">الصفحة متاحة للأدمن فقط</p>
         </div>
         <div className="flex gap-2 flex-wrap">
+          <button
+            onClick={handleExport}
+            disabled={exporting}
+            className="px-3 py-2 rounded-lg text-sm border bg-white text-gray-700 border-gray-200 hover:bg-blue-50 disabled:opacity-60"
+          >
+            {exporting ? 'جارٍ التصدير...' : 'تصدير المستخدمين (CSV)'}
+          </button>
           {tabs.map((t) => (
             <button
               key={t.key}
@@ -724,6 +856,7 @@ export default function AdminUsers() {
       {activeTab === 'password' && renderPasswordForm()}
       {activeTab === 'permissions' && renderPermissions()}
       {activeTab === 'audit' && renderAudit()}
+
     </div>
   );
 }

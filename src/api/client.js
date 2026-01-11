@@ -39,16 +39,12 @@ apiClient.interceptors.request.use(
     }
 );
 
-// Response interceptor - handle errors
+// Response interceptor - handle errors (بدون تسجيل خروج تلقائي لتجنب طرد المستخدم عند 401 في صفحات خاصة)
 apiClient.interceptors.response.use(
     (response) => response,
     (error) => {
-        if (error.response?.status === 401) {
-            // Unauthorized - clear token and redirect to login
-            localStorage.removeItem('authToken');
-            localStorage.removeItem('user');
-            window.location.href = '/login';
-        }
+        // كان هنا تسجيل خروج تلقائي عند 401؛ تم تعطيله لأن بعض الاستجابات (مثل استعلام الصلاحيات) قد تعطي 401 لمستخدم غير مخوّل
+        // ووقتها كنا نطرد المستخدم بالكامل من الجلسة.
         return Promise.reject(error);
     }
 );

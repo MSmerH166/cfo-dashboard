@@ -648,28 +648,6 @@ const calculateGrowth = (current, previous) => {
           </button>
           {saveState === 'ok' && <span className="text-sm text-emerald-600">تم الحفظ</span>}
           {saveState === 'error' && <span className="text-sm text-red-600">تعذر الحفظ</span>}
-          <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-lg px-3 py-2">
-            <label className="text-sm text-gray-600">السنة 1</label>
-            <select
-              className="border border-gray-200 rounded px-2 py-1 text-sm"
-              value={compareYear1}
-              onChange={(e) => setCompareYear1(Number(e.target.value))}
-            >
-              {YEARS.slice().reverse().map((y) => (
-                <option key={`y1-${y}`} value={y}>{y}</option>
-              ))}
-            </select>
-            <label className="text-sm text-gray-600">السنة 2</label>
-            <select
-              className="border border-gray-200 rounded px-2 py-1 text-sm"
-              value={compareYear2}
-              onChange={(e) => setCompareYear2(Number(e.target.value))}
-            >
-              {YEARS.slice().reverse().map((y) => (
-                <option key={`y2-${y}`} value={y}>{y}</option>
-              ))}
-            </select>
-          </div>
           <button
             onClick={resetAllData}
             className="flex items-center gap-2 bg-amber-500 text-white px-3 py-2 rounded-lg hover:bg-amber-600"
@@ -692,33 +670,6 @@ const calculateGrowth = (current, previous) => {
           </button>
         </div>
       </div>
-
-      {/* ملخص تنفيذي سريع */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 bg-white border border-gray-100 rounded-xl p-4">
-        <div className="space-y-1">
-          <div className="text-xs text-gray-500">اتجاه الإيرادات</div>
-          <div className="text-sm text-gray-800 font-semibold">{revenueTrendNote}</div>
-        </div>
-        <div className="space-y-1">
-          <div className="text-xs text-gray-500">تطور الربحية</div>
-          <div className="text-sm text-gray-800 font-semibold">{profitabilityNote}</div>
-        </div>
-        <div className="space-y-1">
-          <div className="text-xs text-gray-500">سبب الانعكاس في 2025</div>
-          <div className="text-sm text-amber-700 font-semibold">{lossNote2025}</div>
-        </div>
-      </div>
-
-      {(turnedToLoss || turnedToProfit) && (
-        <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-4 space-y-1">
-          <div className="font-bold text-sm">{turnedToLoss ? 'تنبيه: تحول من ربح إلى خسارة في 2025' : 'تحسن: تحول من خسارة إلى ربح في 2025'}</div>
-          <ul className="list-disc pr-5 text-xs space-y-1">
-            {flipInsights.map((t, i) => (
-              <li key={i}>{t}</li>
-            ))}
-          </ul>
-        </div>
-      )}
 
       <div className="bg-white rounded-xl shadow-md overflow-x-auto">
         <table className="w-full text-xs text-right border border-gray-200 rounded-xl">
@@ -845,7 +796,8 @@ const calculateGrowth = (current, previous) => {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      {false && (
+      <div className="grid grid-cols-1 lg-grid-cols-2 gap-6">
           <div className="bg-white p-6 rounded-xl shadow-md">
           <h3 className="text-xl font-bold mb-6 text-gray-800">اتجاه الإيرادات وصافي الربح</h3>
           <div className="h-96">
@@ -1044,8 +996,10 @@ const calculateGrowth = (current, previous) => {
           </div>
         </div>
       </div>
+      )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      {false && (
+      <div className="grid grid-cols-1 lg-grid-cols-2 gap-6">
         <div className="bg-white p-6 rounded-xl shadow-md">
           <h3 className="text-xl font-bold mb-4 text-gray-800">هوامش الربحية</h3>
           <div className="h-72">
@@ -1111,9 +1065,38 @@ const calculateGrowth = (current, previous) => {
           </div>
         </div>
       </div>
+      )}
 
       {/* مقارنة بين سنتين */}
       <div ref={compareRef} className="space-y-6 bg-white p-6 rounded-2xl shadow-md border border-gray-100">
+        <div className="flex flex-wrap items-center gap-3 justify-between">
+          <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+            <label className="text-sm text-gray-600">السنة 1</label>
+            <select
+              className="border border-gray-200 rounded px-2 py-1 text-sm"
+              value={compareYear1}
+              onChange={(e) => setCompareYear1(Number(e.target.value))}
+            >
+              {YEARS.slice().reverse().map((y) => (
+                <option key={`y1-${y}`} value={y}>{y}</option>
+              ))}
+            </select>
+            <label className="text-sm text-gray-600">السنة 2</label>
+            <select
+              className="border border-gray-200 rounded px-2 py-1 text-sm"
+              value={compareYear2}
+              onChange={(e) => setCompareYear2(Number(e.target.value))}
+            >
+              {YEARS.slice().reverse().map((y) => (
+                <option key={`y2-${y}`} value={y}>{y}</option>
+              ))}
+            </select>
+          </div>
+          <div className="text-sm text-gray-600">
+            مقارنة بين {compareYear1} و {compareYear2}
+          </div>
+        </div>
+
         <div className="flex items-center gap-2 mb-2">
           <FileSpreadsheet className="text-blue-600" size={18} />
           <h3 className="text-lg font-bold text-gray-900">المقارنة بين سنتين</h3>
@@ -1229,42 +1212,6 @@ const calculateGrowth = (current, previous) => {
                     ))}
                   </tbody>
                 </table>
-              </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="bg-gray-50 p-4 rounded-xl border border-gray-100 print-section chart-printable">
-                  <h4 className="font-bold mb-3 text-gray-800">مقارنة الإيرادات وصافي الربح</h4>
-                  <div className="h-64">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={barData}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="name" />
-                        <YAxis />
-                        <Tooltip formatter={(v, n) => [formatCurrency(v), n]} />
-                        <Legend />
-                        <Bar dataKey={y1} name={`${y1}`} fill="#2563eb" />
-                        <Bar dataKey={y2} name={`${y2}`} fill="#16a34a" />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-
-                <div className="bg-gray-50 p-4 rounded-xl border border-gray-100 print-section chart-printable">
-                  <h4 className="font-bold mb-3 text-gray-800">هوامش الربحية</h4>
-                  <div className="h-64">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={marginData}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="name" />
-                        <YAxis />
-                        <Tooltip formatter={(v, n) => [`${(Number(v) || 0).toFixed(1)}%`, n]} />
-                        <Legend />
-                        <Bar dataKey={y1} name={`${y1}`} fill="#f59e0b" />
-                        <Bar dataKey={y2} name={`${y2}`} fill="#10b981" />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
               </div>
 
               <div className="overflow-auto border border-gray-100 rounded-xl print-section">

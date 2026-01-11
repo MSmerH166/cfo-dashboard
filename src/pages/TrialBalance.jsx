@@ -48,14 +48,11 @@ import { downloadTrialBalanceTemplate, generateTemplateArrayBuffer, parseAndVali
 import HierarchyReport from '../components/reports/HierarchyReport';
 import TrialBalanceSummary from '../components/reports/TrialBalanceSummary';
 import DataQualityReport from '../components/reports/DataQualityReport';
-import FinancialAnalysisReport from '../components/reports/FinancialAnalysisReport';
-
 const TABS = [
   { id: 'matrix', label: 'جدول الميزان', icon: Layers },
   { id: 'hierarchy', label: 'شجرة الحسابات', icon: FolderTree },
   { id: 'summary', label: 'الملخص المالي', icon: PieChart },
   { id: 'quality', label: 'جودة البيانات', icon: Shield },
-  { id: 'analysis', label: 'التحليل المالي', icon: TrendingUp },
 ];
 
 const LEVEL_COLORS = {
@@ -247,10 +244,6 @@ export default function TrialBalance() {
   const [lastUploadAt, setLastUploadAt] = useState(() => localStorage.getItem('tb_last_upload_at') || '');
   const rowRefs = useRef(new Map());
 
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/2519d3ac-7c3e-48c6-96d4-c7343003e3c5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'trial-page-1',hypothesisId:'E',location:'TrialBalance.jsx:init',message:'TrialBalance mount',data:{tbLength:trialBalance?.length||0,tbError:tbError||null},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
-
   // Helper: unified loader for static template with generator fallback
   const loadTemplateBuffer = useCallback(async () => {
     try {
@@ -289,9 +282,6 @@ export default function TrialBalance() {
       });
     } catch (e) {
       console.error('TrialBalance parse error:', e);
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/2519d3ac-7c3e-48c6-96d4-c7343003e3c5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'trial-page-1',hypothesisId:'F',location:'TrialBalance.jsx:processedData',message:'parse error',data:{error:e?.message,hasValidation:!!e?.validationErrors,length:trialBalance?.length||0},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       if (e.validationErrors && e.validationErrors.length > 0) {
         setError(e.validationErrors[0].message || 'فشل التحقق من الكود/الاسم لقطاع 06. راجع الملف.');
       } else {
@@ -315,9 +305,6 @@ export default function TrialBalance() {
       return result;
     } catch (e) {
       console.error('TrialBalance hierarchy error:', e);
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/2519d3ac-7c3e-48c6-96d4-c7343003e3c5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'trial-page-1',hypothesisId:'G',location:'TrialBalance.jsx:hierarchy',message:'hierarchy error',data:{error:e?.message},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       setError('حدث خطأ أثناء بناء الهرمية. يرجى إعادة رفع الملف الرسمي أو مسح البيانات المحفوظة.');
       return { hierarchy: [], warnings: [], totals: null };
     }
@@ -401,6 +388,8 @@ export default function TrialBalance() {
     return calculateFinancialRatios(financialSummary);
   }, [financialSummary]);
 
+  // Memoized data drives all tabs, including analysis.
+
   // تقرير الجودة
   const qualityReport = useMemo(() => {
     if (processedData.length === 0) return null;
@@ -435,6 +424,8 @@ export default function TrialBalance() {
     if (!processedData.length) return [];
     return processedData.filter((row) => (row.debit || 0) === 0 && (row.credit || 0) === 0);
   }, [processedData]);
+
+  // Analysis tab is rendered conditionally via activeTab below.
 
   const handleEdit = (nodeKey, field, value) => {
     const num = parseFloat(String(value).replace(/,/g, '')) || 0;
@@ -637,13 +628,6 @@ export default function TrialBalance() {
     }
   };
 
-  // الانتقال لصفحة التحليل
-  const handleGoToAnalysis = () => {
-    if (processedData.length > 0) {
-      navigate('/analysis');
-    }
-  };
-
   return (
     <div className="p-6 space-y-6 bg-gray-50 min-h-screen">
 
@@ -843,13 +827,6 @@ export default function TrialBalance() {
             )}
           </button>
 
-          <button
-            onClick={handleGoToAnalysis}
-            className="flex items-center gap-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-6 py-3 rounded-xl hover:from-purple-700 hover:to-indigo-700 transition-all shadow-lg hover:shadow-xl"
-          >
-            <ExternalLink size={18} />
-            <span>الانتقال للتحليل المالي</span>
-          </button>
         </div>
       )}
 
@@ -909,7 +886,9 @@ export default function TrialBalance() {
               return (
                 <button
                   key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
+                  onClick={() => {
+                    setActiveTab(tab.id);
+                  }}
                   className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${activeTab === tab.id
                     ? 'border-blue-600 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -1150,13 +1129,6 @@ export default function TrialBalance() {
             <DataQualityReport qualityReport={qualityReport} />
           )}
 
-          {/* Financial Analysis Tab */}
-          {activeTab === 'analysis' && (
-            <FinancialAnalysisReport
-              financialSummary={financialSummary}
-              financialRatios={financialRatios}
-            />
-          )}
         </div>
       </div>
     </div>

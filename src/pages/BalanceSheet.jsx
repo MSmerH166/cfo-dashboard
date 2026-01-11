@@ -5,6 +5,7 @@ import { Download, ChevronDown } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import { statementsAPI } from '../api/client';
+import { parseTrialBalanceData, buildHierarchy } from '../utils/trialBalanceUtils';
 
 const YEARS = [2025, 2024, 2023, 2022, 2021, 2020];
 const COLORS = ['#2563eb', '#22c55e'];
@@ -18,6 +19,7 @@ const formatCurrency = (num) => {
   return num < 0 ? `(${str})` : str;
 };
 
+// مختصر الأرقام للاستخدام في المحاور/التولتيب
 const formatShortNumber = (num) => {
   if (num === null || num === undefined || Number.isNaN(num)) return '';
   const abs = Math.abs(num);
@@ -49,15 +51,106 @@ const loadOverrideBS2025 = () => {
 };
 
 export default function BalanceSheet() {
-  const { historicalBS, updateHistoricalBS, data2025, historicalIS } = useFinancial();
+  const { historicalBS, updateHistoricalBS, data2025, historicalIS, trialBalance } = useFinancial();
   const [override2025, setOverride2025] = useState(loadOverrideBS2025);
   const [notes, setNotes] = useState({});
   const [expanded, setExpanded] = useState({
     assets: true,
     liabilities: true,
   });
-  const [showWcExplain, setShowWcExplain] = useState(false);
   const [saveState, setSaveState] = useState('idle'); // idle | saving | ok | error
+
+  const renderGlCodeCell = (code) => (
+    <td className="p-2 text-center text-[11px] sm:text-xs text-gray-700">
+      {typeof code === 'string' && code.trim() ? code : '-'}
+    </td>
+  );
+
+  const tbComputed2025 = useMemo(() => {
+    if (!trialBalance || trialBalance.length === 0) return null;
+    try {
+      const sumByPrefix = (prefix) => {
+        const pfx = String(prefix || '').trim();
+        if (!pfx) return 0;
+        return trialBalance.reduce((sum, row) => {
+          const code = (row.glCode || row.code || row.accountCode || '').toString();
+          if (!code.startsWith(pfx)) return sum;
+          const val =
+            Number(row['2025']) ??
+            Number(row.amountsByYear?.['2025']) ??
+            Number(row.amounts?.[2025]) ??
+            Number(row.value) ??
+            Number(row.balance) ??
+            0;
+          return sum + (Number.isFinite(val) ? val : 0);
+        }, 0);
+      };
+
+      const sumExpr = (expr = []) =>
+        expr.reduce((acc, { prefix, sign = 1 }) => acc + sign * sumByPrefix(prefix), 0);
+
+      // 02* - 0402* (مجمع الإهلاك يُطرح كمطلق)
+      const propertyEquipment = sumByPrefix('02') - Math.abs(sumByPrefix('0402'));
+      const contractAssets = sumExpr([{ prefix: '0103' }, { prefix: '01090201' }]);
+      const receivables = sumExpr([{ prefix: '0102' }, { prefix: '010801' }, { prefix: '010802' }, { prefix: '0105' }]);
+      const advancesOther = sumExpr([
+        { prefix: '0104' },
+        { prefix: '010901' },
+        { prefix: '010702' },
+        { prefix: '010701' },
+        { prefix: '010903' },
+        { prefix: '0106' },
+      ]);
+      const cashBank = sumExpr([{ prefix: '010101' }, { prefix: '010102' }]);
+      const equityCapital = Math.abs(sumExpr([{ prefix: '0501' }]));
+      const equityStatutoryReserve = Math.abs(sumExpr([{ prefix: '0502' }]));
+      const retainedEarnings = sumExpr([{ prefix: '050402' }, { prefix: '050403' }]);
+      const employeeBenefits = Math.abs(sumExpr([{ prefix: '0401' }]));
+      const relatedPartyPayables = Math.abs(sumExpr([{ prefix: '0503' }]));
+      const contractLiabilities = Math.abs(sumExpr([{ prefix: '0305' }]));
+      const payables = Math.abs(sumExpr([{ prefix: '0301' }, { prefix: '0302' }, { prefix: '0304' }]));
+      const otherCurrentLiabilities = Math.abs(sumExpr([{ prefix: '030801' }, { prefix: '0307' }, { prefix: '0308' }, { prefix: '0309' }]));
+      const zakatTax = Math.abs(sumExpr([{ prefix: '03080104' }, { prefix: '0306' }]));
+
+      const currentAssets = contractAssets + receivables + advancesOther + cashBank;
+      const nonCurrentAssets = propertyEquipment;
+      const nonCurrentLiabilities = employeeBenefits;
+      const currentLiabilities = relatedPartyPayables + contractLiabilities + payables + otherCurrentLiabilities + zakatTax;
+      const totalLiabilities = nonCurrentLiabilities + currentLiabilities;
+      const equityTotal = equityCapital + equityStatutoryReserve + retainedEarnings;
+      const totalAssets = currentAssets + nonCurrentAssets;
+      const totalEquityLiabilities = equityTotal + totalLiabilities;
+
+      return {
+        propertyEquipment,
+        nonCurrentAssets,
+        contractAssets,
+        receivables,
+        advancesOther,
+        cashBank,
+        currentAssets,
+        totalAssets,
+        equityCapital,
+        equityStatutoryReserve,
+        retainedEarnings,
+        equityTotal,
+        employeeBenefits,
+        nonCurrentLiabilities,
+        relatedPartyPayables,
+        contractLiabilities,
+        payables,
+        otherCurrentLiabilities,
+        zakatTax,
+        currentLiabilities,
+        totalLiabilities,
+        totalEquityLiabilities,
+        workingCapital: currentAssets - currentLiabilities,
+      };
+    } catch (e) {
+      console.warn('Failed to compute BS from trial balance', e);
+      return null;
+    }
+  }, [trialBalance]);
   const sectionStyles = {
     assets: {
       bg: 'bg-gradient-to-l from-blue-50 via-white to-blue-100',
@@ -75,7 +168,7 @@ export default function BalanceSheet() {
 
   const getBS = (year) =>
     year === 2025
-      ? { ...(data2025?.bs || {}), ...override2025 }
+      ? { ...((tbComputed2025 || data2025?.bs) || {}), ...override2025 }
       : historicalBS[year] || {};
 
   // Helper aggregators must be declared before useMemo hooks that call them
@@ -130,86 +223,8 @@ export default function BalanceSheet() {
     return result;
   }, [historicalBS, data2025, override2025]);
 
+
   const allYearsData = YEARS.map((year) => ({ year, ...metricsByYear[year] }));
-
-  const wcChartData = useMemo(() => {
-    const getCA = (year) => (metricsByYear[year]?.currentAssets ?? aggregateCA(getBSRaw(year)));
-    const getCL = (year) => (metricsByYear[year]?.currentLiabilities ?? aggregateCL(getBSRaw(year)));
-
-    const base = YEARS.map((year, idx) => {
-      const ca = getCA(year);
-      const cl = getCL(year);
-      const incomplete = ca === 0 && cl === 0;
-      const wc = incomplete ? null : ca - cl;
-
-      const prevYear = YEARS[idx + 1];
-      const prevCa = prevYear !== undefined ? getCA(prevYear) : null;
-      const prevCl = prevYear !== undefined ? getCL(prevYear) : null;
-      const prevIncomplete = prevCa === 0 && prevCl === 0;
-      const prevWc = prevIncomplete ? null : prevCa - prevCl;
-
-      const yoyAbs = prevWc !== null && wc !== null ? wc - prevWc : null;
-      const yoyPct = prevWc !== null && prevWc !== 0 && wc !== null ? (yoyAbs / Math.abs(prevWc)) * 100 : null;
-      const insight =
-        wc === null
-          ? 'بيانات غير مكتملة'
-          : wc > 0
-          ? 'سيولة جيدة'
-          : wc < 0
-          ? 'مخاطرة سيولة مرتفعة'
-          : 'تعادل سيولة';
-      return { year, wc, yoyAbs, yoyPct, insight, index: idx, incomplete };
-    });
-    const filtered = base.filter((d) => d.wc !== null);
-    const n = filtered.length;
-    if (n < 2) return base.map((d) => ({ ...d, trend: d.wc }));
-    const sumX = filtered.reduce((s, d) => s + d.index, 0);
-    const sumY = filtered.reduce((s, d) => s + d.wc, 0);
-    const sumXY = filtered.reduce((s, d) => s + d.index * d.wc, 0);
-    const sumX2 = filtered.reduce((s, d) => s + d.index * d.index, 0);
-    const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX || 1);
-    const intercept = (sumY - slope * sumX) / n;
-    return base.map((d) => ({
-      ...d,
-      trend: d.wc !== null ? intercept + slope * d.index : null,
-    }));
-  }, [metricsByYear, data2025, historicalBS]);
-
-  // اجعل بيانات الشارت آمنة حتى لو كانت بعض القيم null
-  const wcChartSafe = useMemo(
-    () =>
-      (wcChartData || []).map((d) => ({
-        ...d,
-        wc: d.wc ?? 0,
-        trend: d.trend ?? 0,
-        yoyAbs: d.yoyAbs ?? 0,
-        yoyPct: d.yoyPct ?? 0,
-      })),
-    [wcChartData]
-  );
-
-  const wcExplanation = useMemo(() => {
-    const series = (wcChartData || [])
-      .filter((d) => d.wc !== null && d.wc !== undefined)
-      .sort((a, b) => a.year - b.year);
-    if (series.length < 2) {
-      return 'يظهر اتجاه رأس المال العامل دون تفسير إضافي لعدم توفر سلسلة زمنية كافية.';
-    }
-    const last = series[series.length - 1];
-    const prev = series[series.length - 2];
-    const diff = last.wc - prev.wc;
-    const dropPct = prev.wc !== 0 ? (diff / Math.abs(prev.wc)) * 100 : null;
-    const sharpDecline = dropPct !== null && dropPct < -15;
-    if (sharpDecline) {
-      const stillPositive = last.wc > 0;
-      return `الانخفاض الحاد في رأس المال العامل في ${last.year} يعكس خسارة تشغيلية خلال السنة مع ارتفاع الالتزامات القصيرة وتباطؤ نمو الأصول المتداولة. ${stillPositive ? 'رغم ذلك يبقى رأس المال العامل موجباً لكنه يشير إلى سيولة أضيق مقارنةً بالسنوات السابقة.' : 'الرصيد يوضح ضيق السيولة ويستدعي متابعة لصيقـة للالتزامات القصيرة.'}`;
-    }
-    if (diff > 0) {
-      return 'اتجاه رأس المال العامل صاعد، ما يعكس تحسناً في السيولة التشغيلية ونمو الأصول المتداولة مقابل الالتزامات القصيرة.';
-    }
-    return 'اتجاه رأس المال العامل مستقر مع تغير محدود بين الأصول المتداولة والالتزامات القصيرة.';
-  }, [wcChartData]);
-
   const ratios = useMemo(() => {
     const y = metricsByYear[2025] || {};
     const wc = (y.currentAssets || 0) - (y.currentLiabilities || 0);
@@ -288,113 +303,7 @@ export default function BalanceSheet() {
 
   const bs2025 = metricsByYear[2025] || {};
 
-  const computeWC = (year) => {
-    const bsYear = getBSRaw(year) || {};
-    const ca = aggregateCA(bsYear);
-    const cl = aggregateCL(bsYear);
-    const hasAsset = ca !== 0;
-    const hasLiab = cl !== 0;
-    if (!hasAsset && !hasLiab) {
-      return { ca: 0, cl: 0, wc: null, hasAsset, hasLiab };
-    }
-    return { ca, cl, wc: ca - cl, hasAsset, hasLiab };
-  };
-
-  const wcAnalysis = useMemo(() => {
-    const getCA = (year) => {
-      const m = metricsByYear[year] || {};
-      if (m.currentAssets !== undefined) return m.currentAssets;
-      const bsYear = getBSRaw(year) || {};
-      return aggregateCA(bsYear);
-    };
-    const getCL = (year) => {
-      const m = metricsByYear[year] || {};
-      if (m.currentLiabilities !== undefined) return m.currentLiabilities;
-      const bsYear = getBSRaw(year) || {};
-      return aggregateCL(bsYear);
-    };
-
-    const rows = YEARS.map((year, idx) => {
-      const ca = getCA(year);
-      const cl = getCL(year);
-      const incomplete = ca === 0 && cl === 0;
-      const wc = incomplete ? null : ca - cl;
-
-      const prevYear = YEARS[idx + 1];
-      const prevCa = prevYear !== undefined ? getCA(prevYear) : null;
-      const prevCl = prevYear !== undefined ? getCL(prevYear) : null;
-      const prevIncomplete = prevCa === 0 && prevCl === 0;
-      const prevWc = prevIncomplete ? null : prevCa - prevCl;
-
-      const yoy = prevWc !== null && wc !== null ? wc - prevWc : null;
-      const yoyPct = prevWc !== null && prevWc !== 0 && wc !== null ? (yoy / Math.abs(prevWc)) * 100 : null;
-      const explain =
-        wc === null
-          ? 'بيانات غير مكتملة'
-          : wc > 0
-          ? 'سيولة جيدة'
-          : wc < 0
-          ? 'مخاطرة سيولة مرتفعة'
-          : 'تعادل سيولة';
-
-      return { year, wc, yoy, yoyPct, explain, incomplete };
-    });
-
-    const valid = rows.filter((r) => r.wc !== null && !Number.isNaN(r.wc));
-    const best = valid.reduce((acc, r) => (acc && acc.wc > r.wc ? acc : r), null);
-    const worst = valid.reduce((acc, r) => (acc && acc.wc < r.wc ? acc : r), null);
-
-    const first = valid[valid.length - 1];
-    const last = valid[0];
-    const trend =
-      first && last
-        ? last.wc > first.wc
-          ? 'اتجاه عام صاعد للسيولة التشغيلية'
-          : last.wc < first.wc
-          ? 'اتجاه عام هابط للسيولة التشغيلية'
-          : 'الاتجاه مستقر'
-        : 'الاتجاه غير متاح';
-
-    const coverage =
-      bs2025.currentLiabilities && bs2025.currentLiabilities !== 0
-        ? (bs2025.currentAssets || 0) / bs2025.currentLiabilities
-        : null;
-
-    // Advanced KPIs
-    const bs2025Data = getBS(2025) || {};
-    const isByYear = (year) => getIS(year) || {};
-    const revenue = isByYear(2025).revenue || 0;
-    const cogs = isByYear(2025).cogs || 0;
-    const ar = bs2025Data.receivables || 0;
-    const ap = bs2025Data.payables || 0;
-    const inventory = bs2025Data.inventory || 0; // fallback إن لم تتوفر قيمة
-
-    const dso = revenue > 0 ? (ar / revenue) * 365 : null;
-    const dpo = cogs > 0 ? (ap / cogs) * 365 : null;
-    const dio = cogs > 0 ? (inventory / cogs) * 365 : null;
-    const wcc = (dso || 0) + (dio || 0) - (dpo || 0);
-    const ccc = wcc;
-
-    // Liquidity Risk Score (تجميعي بسيط)
-    const cr = coverage;
-    const qr = bs2025.currentLiabilities ? ((bs2025.cashBank || 0) + (bs2025.receivables || 0)) / bs2025.currentLiabilities : null;
-    const dta = bs2025.totalAssets ? (bs2025.totalLiabilities || 0) / bs2025.totalAssets : null;
-    const cccScore = ccc !== null ? Math.max(0, Math.min(1, 1 - ccc / 365)) : 0.5;
-    const crScore = cr !== null ? Math.max(0, Math.min(1, cr / 2)) : 0.5;
-    const qrScore = qr !== null ? Math.max(0, Math.min(1, qr / 2)) : 0.5;
-    const dtaScore = dta !== null ? Math.max(0, Math.min(1, 1 - dta)) : 0.5;
-    const wcScore = valid.length ? Math.max(0, Math.min(1, (last?.wc || 0) / Math.max(Math.abs(last?.wc || 1), 1))) : 0.5;
-    const lrs = Math.round(((cccScore + crScore + qrScore + dtaScore + wcScore) / 5) * 100);
-
-    return {
-      rows,
-      best,
-      worst,
-      trend,
-      coverage,
-      kpis: { dso, dpo, dio, wcc, ccc, lrs },
-    };
-  }, [data2025, historicalBS, bs2025]);
+  // تم حذف تحليل رأس المال العامل والجداول/المخططات الخاصة به
 
   const handleChange = (year, field, textValue, el) => {
     const parsed = parseNumber(textValue);
@@ -472,28 +381,7 @@ export default function BalanceSheet() {
     );
   };
 
-  const CustomWCTooltip = ({ active, payload, label }) => {
-    if (!active || !payload || payload.length === 0) return null;
-    const wcVal = payload.find((p) => p.dataKey === 'wc')?.value ?? null;
-    const row = wcChartData.find((d) => `${d.year}` === `${label}`);
-    return (
-      <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-lg text-right">
-        <p className="text-xs font-semibold text-gray-800 mb-1">رأس المال العامل - {label}</p>
-        <p className="text-sm font-bold text-blue-700">القيمة: {wcVal !== null ? formatCurrency(wcVal) : '—'}</p>
-        {row?.yoyAbs !== null && (
-          <p className="text-xs text-gray-600">
-            التغير السنوي: <span className={row.yoyAbs >= 0 ? 'text-green-600' : 'text-red-600'}>{formatCurrency(row.yoyAbs)}</span>
-          </p>
-        )}
-        {row?.yoyPct !== null && (
-          <p className="text-xs text-gray-600">
-            % التغير: <span className={row.yoyPct >= 0 ? 'text-green-600' : 'text-red-600'}>{row.yoyPct.toFixed(1)}%</span>
-          </p>
-        )}
-        {row?.insight && <p className="text-[11px] text-gray-500 mt-1">{row.insight}</p>}
-      </div>
-    );
-  };
+  // تم إزالة التولتيب الخاص بمخطط رأس المال العامل بعد حذف المخطط
 
   const exportPDF = () => {
     const input = document.getElementById('bs-page');
@@ -856,248 +744,7 @@ export default function BalanceSheet() {
         </table>
       </div>
 
-      {/* Analysis Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Working Capital Chart */}
-        <div className="bg-white p-6 rounded-xl shadow-md">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-xl font-bold text-gray-800">تطور رأس المال العامل</h3>
-            <button
-              type="button"
-              onClick={() => setShowWcExplain((v) => !v)}
-              className="text-sm px-3 py-1 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50"
-            >
-              {showWcExplain ? 'إخفاء التفسير' : 'إظهار التفسير'}
-            </button>
-          </div>
-          {showWcExplain && (
-            <div className="mb-4 text-sm text-gray-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
-              {wcExplanation}
-            </div>
-          )}
-          <div className="h-80">
-            <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={wcChartData}>
-                <defs>
-                  <linearGradient id="wcGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#2563eb" stopOpacity={0.95} />
-                    <stop offset="100%" stopColor="#7c3aed" stopOpacity={0.7} />
-                  </linearGradient>
-                  <filter id="wcShadow" x="-10%" y="-10%" width="120%" height="120%">
-                    <feDropShadow dx="0" dy="4" stdDeviation="6" floodColor="#1d4ed8" floodOpacity="0.15" />
-                  </filter>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis dataKey="year" tick={{ fontSize: 12 }} />
-                <YAxis
-                  yAxisId="wc"
-                  tickFormatter={formatShortNumber}
-                  tick={{ fontSize: 12 }}
-                  domain={['auto', 'auto']}
-                  width={70}
-                />
-                <YAxis yAxisId="pct" orientation="right" hide domain={['auto', 'auto']} />
-                <Tooltip content={<CustomWCTooltip />} />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Bar
-                  yAxisId="wc"
-                  dataKey="wc"
-                  name="صافي رأس المال العامل"
-                  fill="url(#wcGradient)"
-                  radius={[8, 8, 4, 4]}
-                  style={{ filter: 'url(#wcShadow)' }}
-                />
-                <Line
-                  yAxisId="wc"
-                  type="monotone"
-                  dataKey="trend"
-                  name="خط الاتجاه"
-                  stroke="#10b981"
-                  strokeWidth={2}
-                  dot={{ r: 4, strokeWidth: 1, stroke: '#0f766e', fill: '#10b981' }}
-                  activeDot={{ r: 6, fill: '#0ea5e9' }}
-                />
-                <Line yAxisId="pct" dataKey="yoy" name="التغير % YoY" stroke="#f59e0b" strokeDasharray="4 4" dot={false} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        {/* Liquidity Ratios */}
-        <div className="space-y-6">
-          <div className="bg-white p-6 rounded-xl shadow-md">
-            <h3 className="text-xl font-bold mb-4 text-gray-800">مؤشرات السيولة (2025)</h3>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="p-4 bg-blue-50 rounded-lg text-center">
-                <p className="text-sm text-gray-500 mb-1">نسبة التداول (Current Ratio)</p>
-                <p className="text-2xl font-bold text-blue-700">
-                  {metricsByYear[2025].currentLiabilities
-                    ? (metricsByYear[2025].currentAssets / metricsByYear[2025].currentLiabilities).toFixed(2)
-                    : '0.00'}
-                </p>
-              </div>
-              <div className="p-4 bg-purple-50 rounded-lg text-center">
-                <p className="text-sm text-gray-500 mb-1">الديون / الأصول</p>
-                <p className="text-2xl font-bold text-purple-700">
-                  {metricsByYear[2025].totalAssets
-                    ? ((metricsByYear[2025].totalLiabilities / metricsByYear[2025].totalAssets) * 100).toFixed(1) + '%'
-                    : '0.0%'}
-                </p>
-              </div>
-            </div>
-          </div>
-          
-          <div className="bg-white p-6 rounded-xl shadow-md">
-            <h3 className="text-xl font-bold mb-4 text-gray-800">هيكل التمويل (2025)</h3>
-            <div className="h-48">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={[{ label: '2025', liabilities: metricsByYear[2025].totalLiabilities || 0, equity: metricsByYear[2025].equityTotal || 0 }]} layout="vertical">
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                  <XAxis type="number" tickFormatter={formatShortNumber} />
-                  <YAxis type="category" dataKey="label" width={50} />
-                  <Tooltip formatter={(val) => formatCurrency(val)} />
-                  <Legend />
-                  <Bar dataKey="liabilities" stackId="fin" name="الالتزامات" fill="#2563eb" radius={[6, 6, 0, 0]} />
-                  <Bar dataKey="equity" stackId="fin" name="حقوق الملكية" fill="#22c55e" radius={[0, 0, 6, 6]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-           </div>
-        </div>
-
-          {/* Horizontal Working Capital Analysis */}
-          <div className="bg-white p-6 rounded-xl shadow-md space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xl font-bold text-gray-800">تحليل أفقي لرأس المال العامل</h3>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs text-right border-collapse">
-                <thead>
-                  <tr className="bg-gray-50 text-gray-700">
-                    <th className="p-2">السنة</th>
-                    <th className="p-2">رأس المال العامل</th>
-                    <th className="p-2">التغير السنوي</th>
-                    <th className="p-2">% التغير</th>
-                    <th className="p-2">تفسير</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {wcAnalysis.rows.map((r) => (
-                    <tr key={r.year} className="hover:bg-gray-50">
-                      <td className="p-2 font-semibold text-gray-800">{r.year}</td>
-                      <td className="p-2 font-mono text-blue-800">{r.wc !== null ? formatCurrency(r.wc) : '—'}</td>
-                      <td className="p-2 font-mono text-gray-700">{r.yoy !== null ? formatCurrency(r.yoy) : '—'}</td>
-                      <td className="p-2 font-mono text-gray-700">
-                        {r.yoyPct !== null ? `${r.yoyPct.toFixed(1)}%` : '—'}
-                      </td>
-                      <td className="p-2 text-xs text-gray-600">
-                        {r.wc === null
-                          ? 'بيانات غير مكتملة'
-                          : r.wc > 0
-                          ? 'سيولة جيدة'
-                          : r.wc < 0
-                          ? 'مخاطرة عالية'
-                          : 'متعادل'}{' '}
-                        {r.yoyPct !== null && r.yoyPct < -15 ? '(انخفاض حاد)' : ''}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="h-72">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={[...wcChartSafe].reverse()} layout="vertical" margin={{ left: 60, right: 16 }}>
-                  <defs>
-                    <linearGradient id="wcHGrad" x1="0" y1="0" x2="1" y2="0">
-                      <stop offset="0%" stopColor="#2563eb" stopOpacity={0.95} />
-                      <stop offset="100%" stopColor="#7c3aed" stopOpacity={0.75} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                  <XAxis type="number" tickFormatter={formatShortNumber} />
-                  <YAxis
-                    type="category"
-                    dataKey="year"
-                    tick={{ fontSize: 12, dx: -8 }}
-                    width={70}
-                    tickLine={false}
-                    axisLine={false}
-                  />
-                  <Tooltip content={<CustomWCTooltip />} />
-                <Bar
-                  dataKey="wc"
-                  name="رأس المال العامل"
-                  fill="url(#wcHGrad)"
-                  radius={[6, 6, 6, 6]}
-                  label={{
-                    position: 'insideRight',
-                    formatter: (v) => formatShortNumber(v),
-                    fill: '#fff',
-                    fontSize: 11,
-                  }}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="trend"
-                  name="خط الاتجاه"
-                  stroke="#10b981"
-                  strokeWidth={2}
-                  dot={{ r: 3, strokeWidth: 1, stroke: '#0f766e', fill: '#10b981' }}
-                  activeDot={{ r: 5, fill: '#0ea5e9' }}
-                />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-
-            <div className="bg-gray-50 rounded-lg p-4 space-y-2 text-sm text-gray-700">
-              <p>
-                <span className="font-semibold text-gray-900">أفضل سنة:</span>{' '}
-                {wcAnalysis.best ? `${wcAnalysis.best.year} (${formatCurrency(wcAnalysis.best.wc)})` : '—'}
-              </p>
-              <p>
-                <span className="font-semibold text-gray-900">أسوأ سنة:</span>{' '}
-                {wcAnalysis.worst ? `${wcAnalysis.worst.year} (${formatCurrency(wcAnalysis.worst.wc)})` : '—'}
-              </p>
-              <p>
-                <span className="font-semibold text-gray-900">الاتجاه العام:</span> {wcAnalysis.trend}
-              </p>
-              <p>
-                <span className="font-semibold text-gray-900">تغطية الالتزامات قصيرة الأجل (2025):</span>{' '}
-                {wcAnalysis.coverage !== null ? wcAnalysis.coverage.toFixed(2) : '—'}
-              </p>
-            </div>
-
-          {/* Advanced KPIs */}
-          <div className="bg-white p-6 rounded-xl shadow-md space-y-4">
-            <h3 className="text-xl font-bold text-gray-800 mb-2">مؤشرات تشغيلية متقدمة</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {[
-                { key: 'wcc', label: 'Working Capital Cycle (أيام)', value: wcAnalysis.kpis.wcc },
-                { key: 'dso', label: 'DSO (أيام تحصيل)', value: wcAnalysis.kpis.dso },
-                { key: 'dpo', label: 'DPO (أيام سداد)', value: wcAnalysis.kpis.dpo },
-                { key: 'dio', label: 'DIO (دوران المخزون)', value: wcAnalysis.kpis.dio },
-                { key: 'ccc', label: 'Cash Conversion Cycle', value: wcAnalysis.kpis.ccc },
-                { key: 'lrs', label: 'Liquidity Risk Score', value: wcAnalysis.kpis.lrs },
-              ].map((kpi) => (
-                <div key={kpi.key} className="p-4 rounded-lg border border-gray-100 bg-gradient-to-br from-white via-blue-50 to-white shadow-sm">
-                  <p className="text-sm text-gray-600 mb-1">{kpi.label}</p>
-                  <p className="text-2xl font-bold text-blue-800">
-                    {kpi.value !== null && kpi.value !== undefined
-                      ? typeof kpi.value === 'number'
-                        ? kpi.key === 'lrs'
-                          ? `${kpi.value.toFixed(0)} / 100`
-                          : kpi.value.toFixed(1)
-                        : kpi.value
-                      : '—'}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </div>
-          </div>
-      </div>
+      {/* تم حذف قسم تطور رأس المال العامل */}
     </div>
   );
 }

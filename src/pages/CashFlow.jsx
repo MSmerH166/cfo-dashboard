@@ -15,7 +15,7 @@ import {
   LabelList,
   Cell,
 } from 'recharts';
-import { Download, ChevronDown, Info } from 'lucide-react';
+import { Download, ChevronDown } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import { statementsAPI } from '../api/client';
@@ -53,9 +53,6 @@ export default function CashFlow() {
   });
   const toggle = (key) => setExpanded((prev) => ({ ...prev, [key]: !prev[key] }));
 
-  // تحليل نصي اختياري
-  const [showInsight, setShowInsight] = useState(false);
-  const [showExplain, setShowExplain] = useState(false);
   const [saveState, setSaveState] = useState('idle');
 
   // Combine data
@@ -271,21 +268,6 @@ export default function CashFlow() {
               : (type === 'opening' ? 'Opening Cash' : 'Closing Cash');
       return { ...s, cum, type, sign, color, tag };
     });
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/2519d3ac-7c3e-48c6-96d4-c7343003e3c5', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sessionId: 'debug-session',
-        runId: 'cf-waterfall',
-        hypothesisId: 'Hyp-A',
-        location: 'CashFlow.jsx:waterfallData',
-        message: 'waterfall mapped',
-        data: { steps, mapped },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
     return mapped;
   }, [cashFlowData]);
 
@@ -317,21 +299,6 @@ export default function CashFlow() {
         : d.operating < 0
           ? { text: 'Operating Cash Negative', tone: 'amber' }
           : { text: 'Healthy Operating Cash', tone: 'green' };
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/2519d3ac-7c3e-48c6-96d4-c7343003e3c5', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sessionId: 'debug-session',
-        runId: 'cf-waterfall',
-        hypothesisId: 'Hyp-C',
-        location: 'CashFlow.jsx:badge',
-        message: 'badge computed',
-        data: { operating: d.operating, financing: d.financing, badge: result },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
     return result;
   }, [cashFlowData]);
 
@@ -564,196 +531,8 @@ export default function CashFlow() {
         </table>
       </div>
 
-      {/* Chart */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="bg-white p-6 rounded-xl shadow-md">
-          <h3 className="text-xl font-bold mb-4 text-gray-800">تحليل التدفقات النقدية</h3>
-          <div className="h-80">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={cashFlowData.slice(1)}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="year" />
-                <YAxis tickFormatter={formatShortNumber} />
-                <Tooltip formatter={(val) => formatShortNumber(Number(val))} />
-                <Legend />
-                <Bar dataKey="operating" name="تشغيلي" fill="#10b981" />
-                <Bar dataKey="investing" name="استثماري" fill="#f59e0b" />
-                <Bar dataKey="financing" name="تمويلي" fill="#3b82f6" />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
+      {/* تم حذف الرسوم: تحليل التدفقات النقدية، نقد تشغيلي مقابل صافي الربح، وWaterfall لصافي التغير في النقدية (2025) بناءً على طلب المستخدم */}
 
-        <div className="bg-white p-6 rounded-xl shadow-md">
-          <h3 className="text-xl font-bold mb-4 text-gray-800">نقد تشغيلي مقابل صافي الربح</h3>
-          <div className="h-80">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={cashFlowData.slice(1)}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="year" />
-                <YAxis tickFormatter={formatShortNumber} />
-                <Tooltip formatter={(val) => formatShortNumber(Number(val))} />
-                <Legend />
-                <Bar dataKey="operating" name="تدفق تشغيلي" fill="#0ea5e9" />
-                <Bar dataKey="netIncome" name="صافي الربح" fill="#8b5cf6" />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-      </div>
-
-      <div className="bg-white p-6 rounded-xl shadow-md">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex flex-col">
-              <h3 className="text-xl font-bold text-gray-800">Waterfall لصافي التغير في النقدية (2025)</h3>
-              {badge && (
-                <span
-                  className={`mt-1 inline-flex items-center gap-2 text-xs font-semibold px-2 py-1 rounded-full ${
-                    badge.tone === 'blue'
-                      ? 'bg-blue-50 text-blue-700'
-                      : badge.tone === 'amber'
-                        ? 'bg-amber-50 text-amber-700'
-                        : 'bg-green-50 text-green-700'
-                  }`}
-                >
-                  {badge.tone === 'blue' ? '🔵' : badge.tone === 'amber' ? '⚠️' : '✅'} {badge.text}
-                </span>
-              )}
-            </div>
-            <button
-              onClick={() => setShowInsight((v) => !v)}
-              className="text-sm px-3 py-1 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 flex items-center gap-1"
-            >
-              <Info size={14} /> {showInsight ? 'إخفاء التفسير' : 'إظهار التفسير'}
-            </button>
-          </div>
-          {showInsight && (
-            <div className="mb-3 bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-900">
-              {insightText}
-            </div>
-          )}
-        <div className="h-80">
-          <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart
-                data={waterfallData}
-                margin={{ left: 12, right: 12, top: 10, bottom: 4 }}
-                barCategoryGap="28%"
-                barGap={8}
-              >
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="name" tick={{ fontSize: 12 }} />
-                <YAxis
-                  domain={(() => {
-                    const vals = waterfallData.map((d) => d.value);
-                    const absMax = Math.max(...vals.map((v) => Math.abs(v)), 1);
-                    const pad = absMax * 0.2;
-                    return [-absMax - pad, absMax + pad];
-                  })()}
-                  tickFormatter={formatShortNumber}
-                  width={70}
-                />
-                <ReferenceLine y={0} stroke="#94a3b8" strokeDasharray="3 3" />
-                <Tooltip
-                  content={({ active, payload }) => {
-                    if (!active || !payload || !payload.length) return null;
-                    const p = payload[0].payload;
-                    const isUserAdj = (key) => {
-                      const ovKeys = {
-                        operating: ['netIncome', 'depreciation', 'changeAR', 'changeAP'],
-                        investing: ['changeFixedAssets'],
-                        financing: ['changeLTD', 'changeEquity'],
-                      };
-                      const mapKey = p.type;
-                      const keys = ovKeys[mapKey] || [];
-                      return keys.some((k) => overrides?.[2025]?.[k] !== undefined && overrides?.[2025]?.[k] !== null);
-                    };
-                    const status = isUserAdj(p.type) ? 'قيمة مخصّصة' : 'حساب نظامي';
-                    return (
-                      <div className="bg-white border border-gray-200 rounded-lg p-3 text-sm shadow">
-                        <div className="font-semibold text-gray-800 mb-1">{p.tag || p.name}</div>
-                        <div className="text-gray-700 mb-1">القيمة: {formatShortNumber(p.value)}</div>
-                        <div className="text-xs text-gray-600">الحالة: {status}</div>
-                      </div>
-                    );
-                  }}
-                />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Bar dataKey="value" name="التغير" barSize={56} radius={[4, 4, 0, 0]}>
-                  {waterfallData.map((entry, idx) => {
-                    const palette = {
-                      operating: '#10b981',
-                      investing: '#f59e0b',
-                      financing: '#3b82f6',
-                      total: '#0f172a',
-                      balance: '#64748b',
-                    };
-                    const fill = palette[entry.type] || entry.color || '#94a3b8';
-                    const vals = ['Operating', 'Investing', 'Financing'].map(
-                      (n) => waterfallData.find((w) => w.name === n)?.value || 0
-                    );
-                    const maxAbs = Math.max(...vals.map((v) => Math.abs(v)), 1);
-                    const isMax = Math.abs(entry.value) === maxAbs && ['operating', 'investing', 'financing'].includes(entry.type);
-                    return (
-                      <Cell
-                        key={`cell-${idx}`}
-                        fill={fill}
-                        stroke={isMax ? '#0f172a' : fill}
-                        strokeWidth={isMax ? 2 : 1}
-                      />
-                    );
-                  })}
-                  <LabelList
-                    dataKey="value"
-                    position="top"
-                    formatter={(val) => `${val >= 0 ? '↑' : '↓'} ${formatShortNumber(Math.abs(val))}`}
-                    className="text-[11px] fill-gray-800"
-                  />
-                </Bar>
-                <Line
-                  dataKey="cum"
-                  name="الرصيد التراكمي"
-                  stroke="#2563eb"
-                  strokeWidth={2.5}
-                  dot={{ r: 3.5, strokeWidth: 1, stroke: '#1d4ed8', fill: '#fff' }}
-                  activeDot={{ r: 5, fill: '#2563eb', stroke: '#1d4ed8' }}
-                />
-            </ComposedChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-
-      {/* تحليلات اختيارية */}
-      <div className="bg-white rounded-xl border border-gray-100 p-4 space-y-3">
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setShowInsight((v) => !v)}
-            className="px-3 py-1 text-sm rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50"
-          >
-            {showInsight ? 'إخفاء التحليل' : 'إظهار التحليل'}
-          </button>
-          <button
-            onClick={() => setShowExplain((v) => !v)}
-            className="px-3 py-1 text-sm rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 flex items-center gap-1"
-          >
-            <Info size={14} /> {showExplain ? 'إخفاء الشرح' : 'إظهار الشرح'}
-          </button>
-        </div>
-        {showInsight && (
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-900">
-            {insightText}
-          </div>
-        )}
-        {showExplain && (
-          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-900 space-y-1">
-            <div className="font-semibold">تنفيذي:</div>
-            <p>التدفقات التشغيلية هي المؤشر الأهم على جودة الربح والسيولة، مع مراقبة أثر رأس المال العامل.</p>
-            <div className="font-semibold">مالي (CFO):</div>
-            <p>راقب Cash Flow ÷ Net Income واتجاه OCF مقابل تغير رأس المال العامل لتقييم استدامة السيولة التشغيلية.</p>
-            <div className="font-semibold">تدقيقي:</div>
-            <p>الفروق بين الربح والنقد يجب أن تُعزى إلى البنود غير النقدية وتغيرات رأس المال العامل، لا إلى تعديلات صامتة أو موازنة تلقائية.</p>
-          </div>
-        )}
-      </div>
     </div>
   );
 }

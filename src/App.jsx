@@ -1,3 +1,4 @@
+import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, useLocation, Navigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import Dashboard from './pages/Dashboard';
@@ -9,6 +10,40 @@ import ExecutiveReport from './pages/ExecutiveReport';
 import AdminUsers from './pages/AdminUsers';
 import Login from './pages/Login';
 import { LogOut, Home, FileText, Building2, Wallet, Scale, Briefcase, ShieldCheck } from 'lucide-react';
+
+class AppErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error, info) {
+    fetch('http://127.0.0.1:7243/ingest/e84f2f1c-cf0f-4c3f-adf2-f4cf253c8d5a', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: 'debug-session',
+        runId: 'app-render',
+        hypothesisId: 'H1',
+        location: 'App.jsx:ErrorBoundary',
+        message: 'render error',
+        data: { error: error?.message, stack: error?.stack?.split('\n')?.slice(0, 3), componentStack: info?.componentStack },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return <div style={{ padding: 24, fontFamily: 'sans-serif' }}>حدث خطأ في التحميل. الرجاء تحديث الصفحة.</div>;
+    }
+    return this.props.children;
+  }
+}
 
 // Protected Route Component
 function ProtectedRoute({ children, adminOnly = false, permissionKey }) {
@@ -22,10 +57,6 @@ function ProtectedRoute({ children, adminOnly = false, permissionKey }) {
     return allowed.includes(permissionKey);
   };
 
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/2519d3ac-7c3e-48c6-96d4-c7343003e3c5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'trial-page-1',hypothesisId:'A',location:'App.jsx:ProtectedRoute',message:'route check',data:{isAuthenticated,loading,adminOnly,permissionKey,role:user?.role,allowedPagesCount:user?.allowedPages?.length||0},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
-
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -38,23 +69,14 @@ function ProtectedRoute({ children, adminOnly = false, permissionKey }) {
   }
 
   if (!isAuthenticated) {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/2519d3ac-7c3e-48c6-96d4-c7343003e3c5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'trial-page-1',hypothesisId:'B',location:'App.jsx:ProtectedRoute',message:'redirect to login',data:{reason:'unauthenticated'},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     return <Navigate to="/login" replace />;
   }
 
   if (adminOnly && user?.role !== 'admin') {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/2519d3ac-7c3e-48c6-96d4-c7343003e3c5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'trial-page-1',hypothesisId:'C',location:'App.jsx:ProtectedRoute',message:'redirect non-admin',data:{role:user?.role},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     return <Navigate to="/" replace />;
   }
 
   if (!hasPagePermission()) {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/2519d3ac-7c3e-48c6-96d4-c7343003e3c5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'trial-page-1',hypothesisId:'D',location:'App.jsx:ProtectedRoute',message:'redirect no permission',data:{role:user?.role,permissionKey},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     return <Navigate to="/" replace />;
   }
 
@@ -66,6 +88,22 @@ function Layout({ children }) {
   const { user, logout } = useAuth();
   const isLoginPage = location.pathname === '/login';
   const allowedPages = user?.allowedPages;
+
+  useEffect(() => {
+    fetch('http://127.0.0.1:7243/ingest/e84f2f1c-cf0f-4c3f-adf2-f4cf253c8d5a', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: 'debug-session',
+        runId: 'app-render',
+        hypothesisId: 'H2',
+        location: 'App.jsx:Layout',
+        message: 'layout render',
+        data: { path: location.pathname, hasUser: !!user, loading: false },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+  }, [location.pathname, user]);
 
   const navLinks = [
     { key: 'dashboard', label: 'الرئيسية', to: '/', icon: <Home className="w-4 h-4" /> },
@@ -170,20 +208,22 @@ function Layout({ children }) {
 
 function App() {
   return (
-    <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-      <Layout>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="/" element={<ProtectedRoute permissionKey="dashboard"><Dashboard /></ProtectedRoute>} />
-          <Route path="/income-statement" element={<ProtectedRoute permissionKey="income"><IncomeStatement /></ProtectedRoute>} />
-          <Route path="/balance-sheet" element={<ProtectedRoute permissionKey="balance"><BalanceSheet /></ProtectedRoute>} />
-          <Route path="/cash-flow" element={<ProtectedRoute permissionKey="cash"><CashFlow /></ProtectedRoute>} />
-          <Route path="/trial-balance" element={<ProtectedRoute permissionKey="trial"><TrialBalance /></ProtectedRoute>} />
-          <Route path="/executive-report" element={<ProtectedRoute permissionKey="executive"><ExecutiveReport /></ProtectedRoute>} />
-          <Route path="/admin-users" element={<ProtectedRoute adminOnly permissionKey="admin"><AdminUsers /></ProtectedRoute>} />
-        </Routes>
-      </Layout>
-    </Router>
+    <AppErrorBoundary>
+      <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <Layout>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="/" element={<ProtectedRoute permissionKey="dashboard"><Dashboard /></ProtectedRoute>} />
+            <Route path="/income-statement" element={<ProtectedRoute permissionKey="income"><IncomeStatement /></ProtectedRoute>} />
+            <Route path="/balance-sheet" element={<ProtectedRoute permissionKey="balance"><BalanceSheet /></ProtectedRoute>} />
+            <Route path="/cash-flow" element={<ProtectedRoute permissionKey="cash"><CashFlow /></ProtectedRoute>} />
+            <Route path="/trial-balance" element={<ProtectedRoute permissionKey="trial"><TrialBalance /></ProtectedRoute>} />
+            <Route path="/executive-report" element={<ProtectedRoute permissionKey="executive"><ExecutiveReport /></ProtectedRoute>} />
+            <Route path="/admin-users" element={<ProtectedRoute adminOnly permissionKey="admin"><AdminUsers /></ProtectedRoute>} />
+          </Routes>
+        </Layout>
+      </Router>
+    </AppErrorBoundary>
   );
 }
 

@@ -24,6 +24,20 @@ export const AuthProvider = ({ children }) => {
     // Check for existing session on mount
     useEffect(() => {
         const initAuth = async () => {
+            fetch('http://127.0.0.1:7243/ingest/e84f2f1c-cf0f-4c3f-adf2-f4cf253c8d5a', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    sessionId: 'debug-session',
+                    runId: 'auth-init',
+                    hypothesisId: 'H1',
+                    location: 'AuthContext:initAuth',
+                    message: 'init start',
+                    data: {},
+                    timestamp: Date.now(),
+                }),
+            }).catch(() => {});
+
             const token = localStorage.getItem('authToken');
             const savedUser = localStorage.getItem('user');
 
@@ -48,8 +62,34 @@ export const AuthProvider = ({ children }) => {
                 localStorage.setItem('authToken', response.token);
                 localStorage.setItem('user', JSON.stringify(response.user));
                 setUser(response.user);
+                fetch('http://127.0.0.1:7243/ingest/e84f2f1c-cf0f-4c3f-adf2-f4cf253c8d5a', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        sessionId: 'debug-session',
+                        runId: 'auth-init',
+                        hypothesisId: 'H2',
+                        location: 'AuthContext:initAuth',
+                        message: 'auto login success',
+                        data: { user: response.user?.email },
+                        timestamp: Date.now(),
+                    }),
+                }).catch(() => {});
             } catch (err) {
                 console.warn('Auto-login failed, user will need to sign in manually', err);
+                fetch('http://127.0.0.1:7243/ingest/e84f2f1c-cf0f-4c3f-adf2-f4cf253c8d5a', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        sessionId: 'debug-session',
+                        runId: 'auth-init',
+                        hypothesisId: 'H3',
+                        location: 'AuthContext:initAuth',
+                        message: 'auto login failed',
+                        data: { error: err?.message },
+                        timestamp: Date.now(),
+                    }),
+                }).catch(() => {});
             } finally {
                 setLoading(false);
             }
@@ -66,10 +106,6 @@ export const AuthProvider = ({ children }) => {
             setError(null);
             setLoading(true);
 
-            // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/2519d3ac-7c3e-48c6-96d4-c7343003e3c5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'login-debug1',hypothesisId:'A',location:'AuthContext.jsx:login:start',message:'login start',data:{email,API_BASE_URL,normalizedBase,fallbackUrl},timestamp:Date.now()})}).catch(()=>{});
-            // #endregion
-
             // المحاولة الأولى عبر axios (apiClient)
             const response = await authAPI.login(email, password);
 
@@ -80,10 +116,6 @@ export const AuthProvider = ({ children }) => {
 
             return { success: true };
         } catch (err) {
-            // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/2519d3ac-7c3e-48c6-96d4-c7343003e3c5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'login-debug1',hypothesisId:'B',location:'AuthContext.jsx:login:axios_error',message:'axios login failed',data:{status:err?.response?.status,url:err?.config?.url,baseURL:err?.config?.baseURL},timestamp:Date.now()})}).catch(()=>{});
-            // #endregion
-
             // محاولة احتياطية مباشرة عبر fetch لتجنب أي مشاكل axios أو CORS محلية
             try {
                 const res = await fetch(fallbackUrl, {
@@ -92,18 +124,11 @@ export const AuthProvider = ({ children }) => {
                     body: JSON.stringify({ email, password }),
                 });
 
-                // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/2519d3ac-7c3e-48c6-96d4-c7343003e3c5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'login-debug1',hypothesisId:'C',location:'AuthContext.jsx:login:fallback_fetch',message:'fallback fetch result',data:{status:res.status,url:fallbackUrl},timestamp:Date.now()})}).catch(()=>{});
-                // #endregion
-
                 if (res.ok) {
                     const data = await res.json();
                     localStorage.setItem('authToken', data.token);
                     localStorage.setItem('user', JSON.stringify(data.user));
                     setUser(data.user);
-                    // #region agent log
-                    fetch('http://127.0.0.1:7242/ingest/2519d3ac-7c3e-48c6-96d4-c7343003e3c5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'login-debug1',hypothesisId:'D',location:'AuthContext.jsx:login:fallback_success',message:'fallback login success',data:{userId:data?.user?.id},timestamp:Date.now()})}).catch(()=>{});
-                    // #endregion
                     return { success: true };
                 } else {
                     const body = await res.json().catch(() => ({}));
@@ -112,9 +137,6 @@ export const AuthProvider = ({ children }) => {
                     // سنحاول لاحقاً الدخول التجريبي إن وُجد
                 }
             } catch (fallbackErr) {
-                // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/2519d3ac-7c3e-48c6-96d4-c7343003e3c5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'login-debug1',hypothesisId:'E',location:'AuthContext.jsx:login:fallback_error',message:'fallback login error',data:{status:fallbackErr?.response?.status,msg:fallbackErr?.message},timestamp:Date.now()})}).catch(()=>{});
-                // #endregion
                 const status = fallbackErr.response?.status;
                 const backendMsg = fallbackErr.response?.data?.error;
                 const message = backendMsg || (status ? `فشل تسجيل الدخول (رمز ${status})` : 'فشل تسجيل الدخول');
