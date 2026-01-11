@@ -21,78 +21,28 @@ export const AuthProvider = ({ children }) => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
-    // Check for existing session on mount
+    // Check for existing session on mount (بدون أي محاولات دخول تلقائي)
     useEffect(() => {
         const initAuth = async () => {
-            fetch('http://127.0.0.1:7243/ingest/e84f2f1c-cf0f-4c3f-adf2-f4cf253c8d5a', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    sessionId: 'debug-session',
-                    runId: 'auth-init',
-                    hypothesisId: 'H1',
-                    location: 'AuthContext:initAuth',
-                    message: 'init start',
-                    data: {},
-                    timestamp: Date.now(),
-                }),
-            }).catch(() => {});
-
             const token = localStorage.getItem('authToken');
             const savedUser = localStorage.getItem('user');
 
             if (token && savedUser) {
                 try {
-                    // Verify token is still valid
                     const response = await authAPI.getCurrentUser();
                     setUser(response.user);
                     setLoading(false);
                     return;
                 } catch (err) {
-                    // Token invalid, clear storage
+                    // Token invalid, clear storage silently
                     localStorage.removeItem('authToken');
                     localStorage.removeItem('user');
                     setUser(null);
                 }
             }
 
-            // Fallback: تسجيل دخول تلقائي بالحساب الافتراضي لتجنب ارتداد المستخدم إلى صفحة الدخول
-            try {
-                const response = await authAPI.login('m.samer@bonyan-sa.com', 'Mm123456789');
-                localStorage.setItem('authToken', response.token);
-                localStorage.setItem('user', JSON.stringify(response.user));
-                setUser(response.user);
-                fetch('http://127.0.0.1:7243/ingest/e84f2f1c-cf0f-4c3f-adf2-f4cf253c8d5a', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        sessionId: 'debug-session',
-                        runId: 'auth-init',
-                        hypothesisId: 'H2',
-                        location: 'AuthContext:initAuth',
-                        message: 'auto login success',
-                        data: { user: response.user?.email },
-                        timestamp: Date.now(),
-                    }),
-                }).catch(() => {});
-            } catch (err) {
-                console.warn('Auto-login failed, user will need to sign in manually', err);
-                fetch('http://127.0.0.1:7243/ingest/e84f2f1c-cf0f-4c3f-adf2-f4cf253c8d5a', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        sessionId: 'debug-session',
-                        runId: 'auth-init',
-                        hypothesisId: 'H3',
-                        location: 'AuthContext:initAuth',
-                        message: 'auto login failed',
-                        data: { error: err?.message },
-                        timestamp: Date.now(),
-                    }),
-                }).catch(() => {});
-            } finally {
-                setLoading(false);
-            }
+            // لا يوجد توكن صالح => يتطلب تسجيل دخول يدوي
+            setLoading(false);
         };
 
         initAuth();
@@ -132,12 +82,24 @@ export const AuthProvider = ({ children }) => {
                     return { success: true };
                 } else {
                     const body = await res.json().catch(() => ({}));
+                    if (res.status === 401) {
+                        // تنظيف صامت للحالة عند 401
+                        localStorage.removeItem('authToken');
+                        localStorage.removeItem('user');
+                        setUser(null);
+                        return { success: false, error: '401' };
+                    }
                     const msg = body.error || `فشل تسجيل الدخول (رمز ${res.status})`;
                     setError(msg);
-                    // سنحاول لاحقاً الدخول التجريبي إن وُجد
                 }
             } catch (fallbackErr) {
                 const status = fallbackErr.response?.status;
+                if (status === 401) {
+                    localStorage.removeItem('authToken');
+                    localStorage.removeItem('user');
+                    setUser(null);
+                    return { success: false, error: '401' };
+                }
                 const backendMsg = fallbackErr.response?.data?.error;
                 const message = backendMsg || (status ? `فشل تسجيل الدخول (رمز ${status})` : 'فشل تسجيل الدخول');
                 setError(message);

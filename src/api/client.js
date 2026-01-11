@@ -5,14 +5,9 @@
 
 import axios from 'axios';
 
-// تحديد عنوان الـ API مع معالجة الفراغات والاحتمالات المختلفة
+// تحديد عنوان الـ API: أولوية لمتغير البيئة، وإلا السقوط إلى backend الإنتاج
 const rawEnv = (import.meta.env.VITE_API_URL || '').trim();
-const fallbackLocal = 'http://localhost:3001/api';
-// إذا لم يحدد المتغير، نُفضّل الخادم المحلي 3001 أولاً، ثم نفس الدومين، لتجنّب 404 من dev server
-const resolvedBase =
-    rawEnv ||
-    fallbackLocal ||
-    (typeof window !== 'undefined' ? `${window.location.origin}/api` : '');
+const resolvedBase = rawEnv || 'https://bonyan-cfo-backend.onrender.com/api';
 // إزالة الشرطة المائلة الأخيرة لتجنب // مزدوج
 export const API_BASE_URL = resolvedBase.replace(/\/$/, '');
 

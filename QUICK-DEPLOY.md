@@ -26,7 +26,7 @@ cd C:\inetpub\wwwroot\cfo-dashboard
 .\deploy-windows.ps1
 
 # 3. النظام جاهز!
-# Backend: http://localhost:3001
+# Backend: https://bonyan-cfo-backend.onrender.com
 # Frontend: http://localhost:4173
 ```
 
